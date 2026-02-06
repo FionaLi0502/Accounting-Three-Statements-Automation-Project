@@ -552,6 +552,20 @@ the company demonstrates {'strong' if financial_data[latest_year]['net_margin']>
 
 else:
     st.info("👆 Upload a GL dataset to begin")
+st.markdown("📌 **Sample format below (more formats coming soon).**")
+
+import pandas as pd
+
+sample_data = pd.DataFrame({
+    "TxnDate": ["2023-01-05", "2023-01-08", "2023-01-12"],
+    "AccountNumber": [4001, 6100, 1001],
+    "AccountName": ["Revenue", "Rent Expense", "Cash"],
+    "Debit": [0.00, 1800.00, 0.00],
+    "Credit": [5200.00, 0.00, 1800.00],
+    "Currency": ["USD", "USD", "USD"]
+})
+
+st.dataframe(sample_data, use_container_width=True)
 
 st.markdown("---")
 st.subheader("⚠️ Early Demo Notice")
