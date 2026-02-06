@@ -33,15 +33,18 @@ Or run locally in 2 minutes (see [Quick Start](#quick-start) below)
 ## 📸 Screenshots
 
 ### Data Upload & Validation
-![Data Validation](screenshots/validation.png)
+<img width="1810" height="725" alt="image" src="https://github.com/user-attachments/assets/07926ded-1296-461d-a603-44b03db96ccb"/>
 *Detects 7 types of data quality issues with AI suggestions*
 
 ### Complete 3-Statement Model
-![Financial Statements](screenshots/statements.png)
+<img width="1742" height="446" alt="image" src="https://github.com/user-attachments/assets/31047a55-8bbe-4c78-96b5-9e1cd83ae434" />
+<img width="1741" height="448" alt="image" src="https://github.com/user-attachments/assets/77080446-af14-44bd-bb28-d054bc5a732c" />
+<img width="1744" height="449" alt="image" src="https://github.com/user-attachments/assets/d7b89f9e-e598-4a02-8c24-3d3648de83f6" />
 *Generates Income Statement, Balance Sheet, and Cash Flow*
 
 ### AI Summary & Insights
-![AI Insights](screenshots/ai-summary.png)
+<img width="823" height="781" alt="image" src="https://github.com/user-attachments/assets/6016a7dd-93db-491a-a4d2-2200fc7bf2a0" />
+<br>
 *Provides executive summary and recommendations*
 
 ---
