@@ -24,7 +24,7 @@ Upload your messy GL data → Get a complete 3-statement financial model in seco
 
 ## 🚀 Live Demo
 
-Try the app here: [[**Three Statements Automation**](your-deployed-streamlit-url)](https://accounting-three-statements-automation-project.streamlit.app/)
+Try the app here: [[**Three Statements Automation**](https://accounting-three-statements-automation-project.streamlit.app/)]
 
 Or run locally in 2 minutes (see [Quick Start](#quick-start) below)
 
