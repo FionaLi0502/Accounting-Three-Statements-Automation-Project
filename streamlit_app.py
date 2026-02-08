@@ -1,4 +1,4 @@
-"""Three Statements Automation - Complete Working Version"""
+"""Three Statements Automation - Complete Working Version with AI Recommendations"""
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -12,6 +12,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.enums import TA_CENTER
+from anthropic import Anthropic
 
 st.set_page_config(page_title="Three Statements Automation", page_icon="📊", layout="wide")
 
@@ -148,82 +149,83 @@ def apply_selected_fixes(df,issues,selections):
                 log.append({'Row':row.name,'Action':'REMOVED','Reason':f'Duplicate {id_col}','Details':f"ID: {row[id_col]}"})
         elif fix=='remove_future_dates':
             before=len(df_fixed)
-            future=df_fixed[df_fixed['TxnDate']>pd.Timestamp.now()].copy()
+            removed=df_fixed[df_fixed['TxnDate']>pd.Timestamp.now()].copy()
             df_fixed=df_fixed[df_fixed['TxnDate']<=pd.Timestamp.now()]
             fixes.append(f"Removed {before-len(df_fixed)} future dates")
-            for _,row in future.iterrows():
+            for _,row in removed.iterrows():
                 log.append({'Row':row.name,'Action':'REMOVED','Reason':'Future date','Details':f"Date: {row['TxnDate']}"})
-    st.session_state.changes_log=log
-    return df_fixed,fixes
+    return df_fixed,fixes,log
 
 def calculate_financial_statements(df):
     df['TxnDate']=pd.to_datetime(df['TxnDate'])
     df['Year']=df['TxnDate'].dt.year
     years=sorted(df['Year'].unique())
-    data={}
-    for y in years:
-        yd=df[df['Year']==y]
-        rev=yd[yd['AccountNumber'].between(4000,4999)]['Credit'].sum()
-        cogs=yd[yd['AccountNumber'].between(5000,5999)]['Debit'].sum()
-        sal=yd[yd['AccountNumber'].between(6000,6099)]['Debit'].sum()
-        rent=yd[yd['AccountNumber'].between(6100,6199)]['Debit'].sum()
-        mkt=yd[yd['AccountNumber'].between(6200,6299)]['Debit'].sum()
-        it=yd[yd['AccountNumber'].between(6300,6399)]['Debit'].sum()
-        trv=yd[yd['AccountNumber'].between(6400,6499)]['Debit'].sum()
-        dep=yd[yd['AccountNumber'].between(6500,6599)]['Debit'].sum()
-        oopex=yd[yd['AccountNumber'].between(6600,7999)]['Debit'].sum()
-        topex=sal+rent+mkt+it+trv+dep+oopex
+    financial_data={}
+    
+    for year in years:
+        df_year=df[df['Year']==year]
+        amt_col='Amount' if 'Amount' in df_year.columns else None
+        if amt_col:
+            df_year['Debit']=df_year[amt_col].apply(lambda x:x if x>0 else 0)
+            df_year['Credit']=df_year[amt_col].apply(lambda x:abs(x)if x<0 else 0)
+        
+        rev=df_year[df_year['AccountNumber'].between(4000,4999)]['Credit'].sum()
+        cogs=df_year[df_year['AccountNumber'].between(5000,5999)]['Debit'].sum()
         gp=rev-cogs
-        ebit=gp-topex
-        int=yd[yd['AccountNumber'].between(7000,7099)]['Debit'].sum()
-        ebt=ebit-int
-        tax=ebt*0.30 if ebt>0 else 0
+        sal=df_year[df_year['AccountNumber'].between(6100,6199)]['Debit'].sum()
+        rent=df_year[df_year['AccountNumber'].between(6200,6299)]['Debit'].sum()
+        mkt=df_year[df_year['AccountNumber'].between(6300,6399)]['Debit'].sum()
+        it=df_year[df_year['AccountNumber'].between(6400,6499)]['Debit'].sum()
+        travel=df_year[df_year['AccountNumber'].between(6500,6599)]['Debit'].sum()
+        dep=df_year[df_year['AccountNumber'].between(6500,6599)]['Debit'].sum()
+        opex=sal+rent+mkt+it+travel
+        ebit=gp-opex
+        int_exp=df_year[df_year['AccountNumber'].between(7000,7999)]['Debit'].sum()
+        ebt=ebit-int_exp
+        tax=df_year[df_year['AccountNumber'].between(8000,8999)]['Debit'].sum()
         ni=ebt-tax
-        cash=yd[yd['AccountNumber'].between(1000,1099)]['Debit'].sum()-yd[yd['AccountNumber'].between(1000,1099)]['Credit'].sum()
-        ar=yd[yd['AccountNumber'].between(1100,1199)]['Debit'].sum()-yd[yd['AccountNumber'].between(1100,1199)]['Credit'].sum()
-        inv=yd[yd['AccountNumber'].between(1200,1299)]['Debit'].sum()-yd[yd['AccountNumber'].between(1200,1299)]['Credit'].sum()
-        oca=yd[yd['AccountNumber'].between(1300,1499)]['Debit'].sum()-yd[yd['AccountNumber'].between(1300,1499)]['Credit'].sum()
-        ca=cash+ar+inv+oca
-        ppeg=yd[yd['AccountNumber'].between(1500,1599)]['Debit'].sum()
-        acdep=yd[yd['AccountNumber'].between(1600,1699)]['Credit'].sum()
-        ppen=ppeg-acdep
-        ofa=yd[yd['AccountNumber'].between(1700,1999)]['Debit'].sum()-yd[yd['AccountNumber'].between(1700,1999)]['Credit'].sum()
-        fa=ppen+ofa
-        ta=ca+fa
-        ap=abs(yd[yd['AccountNumber'].between(2000,2099)]['Credit'].sum()-yd[yd['AccountNumber'].between(2000,2099)]['Debit'].sum())
-        acc=abs(yd[yd['AccountNumber'].between(2100,2199)]['Credit'].sum()-yd[yd['AccountNumber'].between(2100,2199)]['Debit'].sum())
-        ocl=abs(yd[yd['AccountNumber'].between(2200,2499)]['Credit'].sum()-yd[yd['AccountNumber'].between(2200,2499)]['Debit'].sum())
-        cl=ap+acc+ocl
-        ltd=abs(yd[yd['AccountNumber'].between(2500,2999)]['Credit'].sum()-yd[yd['AccountNumber'].between(2500,2999)]['Debit'].sum())
-        tl=cl+ltd
-        cs=abs(yd[yd['AccountNumber'].between(3000,3099)]['Credit'].sum()-yd[yd['AccountNumber'].between(3000,3099)]['Debit'].sum())
-        re=ta-tl-cs
+        
+        cash=df_year[df_year['AccountNumber'].between(1000,1099)]['Debit'].sum()-df_year[df_year['AccountNumber'].between(1000,1099)]['Credit'].sum()
+        ar=df_year[df_year['AccountNumber'].between(1100,1199)]['Debit'].sum()-df_year[df_year['AccountNumber'].between(1100,1199)]['Credit'].sum()
+        inv=df_year[df_year['AccountNumber'].between(1200,1299)]['Debit'].sum()-df_year[df_year['AccountNumber'].between(1200,1299)]['Credit'].sum()
+        ppe=df_year[df_year['AccountNumber'].between(1500,1599)]['Debit'].sum()-df_year[df_year['AccountNumber'].between(1500,1599)]['Credit'].sum()
+        ta=cash+ar+inv+ppe
+        
+        ap=df_year[df_year['AccountNumber'].between(2000,2099)]['Credit'].sum()-df_year[df_year['AccountNumber'].between(2000,2099)]['Debit'].sum()
+        accr=df_year[df_year['AccountNumber'].between(2100,2199)]['Credit'].sum()-df_year[df_year['AccountNumber'].between(2100,2199)]['Debit'].sum()
+        ltd=df_year[df_year['AccountNumber'].between(2500,2599)]['Credit'].sum()-df_year[df_year['AccountNumber'].between(2500,2599)]['Debit'].sum()
+        tl=ap+accr+ltd
+        
+        cs=df_year[df_year['AccountNumber'].between(3000,3099)]['Credit'].sum()-df_year[df_year['AccountNumber'].between(3000,3099)]['Debit'].sum()
+        re=df_year[df_year['AccountNumber'].between(3100,3199)]['Credit'].sum()-df_year[df_year['AccountNumber'].between(3100,3199)]['Debit'].sum()
         te=cs+re
-        cffo=ni+dep+(0.05*rev)
-        capex=-0.1*rev
+        
+        cffo=ni+dep
+        capex=-df_year[df_year['AccountNumber'].between(1500,1599)]['Debit'].sum()
         cfi=capex
-        div=-0.3*ni if ni>0 else 0
+        div=-df_year[df_year['AccountNumber'].between(3200,3299)]['Debit'].sum()
         cff=div
-        ncc=cffo+cfi+cff
-        data[y]={'revenue':rev,'cogs':cogs,'gross_profit':gp,'salaries':sal,'rent':rent,'marketing':mkt,'it_expense':it,
-                'travel':trv,'depreciation':dep,'other_opex':oopex,'total_opex':topex,'ebit':ebit,'interest':int,'ebt':ebt,
-                'tax':tax,'net_income':ni,'cash':cash,'ar':ar,'inventory':inv,'other_current_assets':oca,'current_assets':ca,
-                'ppe_net':ppen,'other_fixed_assets':ofa,'fixed_assets':fa,'total_assets':ta,'ap':ap,'accrued':acc,
-                'other_current_liab':ocl,'current_liab':cl,'long_term_debt':ltd,'total_liab':tl,'common_stock':cs,
+        
+        financial_data[year]={'revenue':rev,'cogs':cogs,'gross_profit':gp,'gross_margin':(gp/rev*100)if rev else 0,
+                'salaries':sal,'rent':rent,'marketing':mkt,'it_expense':it,'travel':travel,'depreciation':dep,
+                'operating_expenses':opex,'ebit':ebit,'ebit_margin':(ebit/rev*100)if rev else 0,'interest':int_exp,
+                'ebt':ebt,'tax':tax,'net_income':ni,'net_margin':(ni/rev*100)if rev else 0,
+                'cash':cash,'ar':ar,'inventory':inv,'ppe_net':ppe,'total_assets':ta,'ap':ap,'accrued':accr,
+                'long_term_debt':ltd,'total_liab':tl,'common_stock':cs,
                 'retained_earnings':re,'total_equity':te,'cffo':cffo,'capex':capex,'cfi':cfi,'dividends':div,'cff':cff,
-                'net_cash_change':ncc,'gross_margin':(gp/rev*100)if rev>0 else 0,'ebit_margin':(ebit/rev*100)if rev>0 else 0,
-                'net_margin':(ni/rev*100)if rev>0 else 0}
-    return data
+                'net_cash_change':cffo+cfi+cff}
+    return financial_data
 
 def update_excel_model(financial_data,template_path):
     try:
         wb=openpyxl.load_workbook(template_path)
         ws=wb.active
         years=sorted(financial_data.keys())
-        for idx,y in enumerate(years[:3]):
-            ws.cell(row=2,column=2+idx).value=y
-        for idx,y in enumerate(years[:3]):
-            col,d=2+idx,financial_data[y]
+        for idx,year in enumerate(years[:3]):
+            ws.cell(row=2,column=2+idx).value=year
+        for idx,year in enumerate(years[:3]):
+            col=2+idx
+            d=financial_data[year]
             ws.cell(row=32,column=col).value=d['revenue']/1000
             ws.cell(row=33,column=col).value=d['cogs']/1000
             ws.cell(row=35,column=col).value=(d['salaries']+d['rent'])/1000
@@ -249,7 +251,7 @@ def update_excel_model(financial_data,template_path):
         output.seek(0)
         return output
     except Exception as e:
-        st.error(f"Excel error: {str(e)}")
+        st.error(f"Error updating Excel: {str(e)}")
         return None
 
 def generate_reconciliation(original_df,cleaned_df,financial_data):
@@ -257,304 +259,339 @@ def generate_reconciliation(original_df,cleaned_df,financial_data):
     cleaned_df['Year']=pd.to_datetime(cleaned_df['TxnDate']).dt.year
     return {'original_summary':{'total_transactions':len(original_df),'by_year':original_df.groupby('Year').size().to_dict()},
             'cleaned_summary':{'total_transactions':len(cleaned_df),'by_year':cleaned_df.groupby('Year').size().to_dict()},
-            'differences':[],'removed_items':[]}
+            'financial_highlights':{year:{'revenue':data['revenue'],'net_income':data['net_income'],'total_assets':data['total_assets']}for year,data in financial_data.items()}}
 
 def generate_pdf_report(financial_data,recon):
-    output=io.BytesIO()
-    doc=SimpleDocTemplate(output,pagesize=letter,topMargin=0.5*inch,bottomMargin=0.5*inch,leftMargin=0.5*inch,rightMargin=0.5*inch)
+    buffer=io.BytesIO()
+    doc=SimpleDocTemplate(buffer,pagesize=letter,rightMargin=inch,leftMargin=inch,topMargin=inch,bottomMargin=inch)
     story,styles=[],getSampleStyleSheet()
-    title_style=ParagraphStyle('CustomTitle',parent=styles['Heading1'],fontSize=24,textColor=rl_colors.HexColor('#1f4e78'),spaceAfter=20,alignment=TA_CENTER)
-    story.append(Paragraph("Three Statements Model",title_style))
-    story.append(Paragraph(f"Generated: {datetime.now().strftime('%B %d, %Y')}",styles['Normal']))
+    title_style=ParagraphStyle(name='CustomTitle',parent=styles['Heading1'],fontSize=24,textColor=rl_colors.HexColor('#2C3E50'),
+                              spaceAfter=30,alignment=TA_CENTER,fontName='Helvetica-Bold')
+    story.append(Paragraph("Financial Summary Report",title_style))
     story.append(Spacer(1,0.3*inch))
+    
     years=sorted(financial_data.keys())
-    story.append(Paragraph("<b>Income Statement</b>",styles['Heading2']))
-    is_data=[['',*[str(y)for y in years]],['Revenues',*[f"${financial_data[y]['revenue']:,.0f}"for y in years]],
-             ['COGS',*[f"${financial_data[y]['cogs']:,.0f}"for y in years]],['Gross Profit',*[f"${financial_data[y]['gross_profit']:,.0f}"for y in years]],
-             ['Operating Expenses',*[f"${financial_data[y]['total_opex']:,.0f}"for y in years]],['EBIT',*[f"${financial_data[y]['ebit']:,.0f}"for y in years]],
-             ['Interest',*[f"${financial_data[y]['interest']:,.0f}"for y in years]],['EBT',*[f"${financial_data[y]['ebt']:,.0f}"for y in years]],
-             ['Tax',*[f"${financial_data[y]['tax']:,.0f}"for y in years]],['Net Income',*[f"${financial_data[y]['net_income']:,.0f}"for y in years]]]
-    is_table=Table(is_data,colWidths=[2.5*inch]+[1.5*inch]*len(years))
-    is_table.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),rl_colors.HexColor('#1f4e78')),('TEXTCOLOR',(0,0),(-1,0),rl_colors.whitesmoke),
-                                  ('ALIGN',(0,0),(-1,-1),'CENTER'),('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),('BOTTOMPADDING',(0,0),(-1,0),12),
-                                  ('GRID',(0,0),(-1,-1),1,rl_colors.grey),('FONTNAME',(0,-1),(-1,-1),'Helvetica-Bold')]))
+    is_data=[['Line Item']+[str(y)for y in years],
+             ['Revenue']+[f"${financial_data[y]['revenue']:,.0f}"for y in years],
+             ['COGS']+[f"${financial_data[y]['cogs']:,.0f}"for y in years],
+             ['Gross Profit']+[f"${financial_data[y]['gross_profit']:,.0f}"for y in years],
+             ['Operating Expenses']+[f"${financial_data[y]['operating_expenses']:,.0f}"for y in years],
+             ['Net Income']+[f"${financial_data[y]['net_income']:,.0f}"for y in years]]
+    
+    is_table=Table(is_data,colWidths=[2*inch]+[1.2*inch]*len(years))
+    is_table.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),rl_colors.HexColor('#34495E')),
+                                  ('TEXTCOLOR',(0,0),(-1,0),rl_colors.whitesmoke),
+                                  ('ALIGN',(0,0),(-1,-1),'CENTER'),
+                                  ('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),
+                                  ('FONTSIZE',(0,0),(-1,0),12),
+                                  ('BOTTOMPADDING',(0,0),(-1,0),12),
+                                  ('BACKGROUND',(0,1),(-1,-1),rl_colors.HexColor('#ECF0F1')),
+                                  ('GRID',(0,0),(-1,-1),1,rl_colors.black)]))
+    story.append(Paragraph("Income Statement",styles['Heading2']))
+    story.append(Spacer(1,0.2*inch))
     story.append(is_table)
     story.append(Spacer(1,0.3*inch))
-    story.append(Paragraph("<b>Balance Sheet</b>",styles['Heading2']))
-    bs_data=[['',*[str(y)for y in years]],['Current Assets',*[f"${financial_data[y]['current_assets']:,.0f}"for y in years]],
-             ['Fixed Assets',*[f"${financial_data[y]['fixed_assets']:,.0f}"for y in years]],['Total Assets',*[f"${financial_data[y]['total_assets']:,.0f}"for y in years]],
-             ['Current Liabilities',*[f"${financial_data[y]['current_liab']:,.0f}"for y in years]],['Long-term Debt',*[f"${financial_data[y]['long_term_debt']:,.0f}"for y in years]],
-             ['Total Liabilities',*[f"${financial_data[y]['total_liab']:,.0f}"for y in years]],['Total Equity',*[f"${financial_data[y]['total_equity']:,.0f}"for y in years]]]
-    bs_table=Table(bs_data,colWidths=[2.5*inch]+[1.5*inch]*len(years))
-    bs_table.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),rl_colors.HexColor('#1f4e78')),('TEXTCOLOR',(0,0),(-1,0),rl_colors.whitesmoke),
-                                 ('ALIGN',(0,0),(-1,-1),'CENTER'),('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),('BOTTOMPADDING',(0,0),(-1,0),12),
-                                 ('GRID',(0,0),(-1,-1),1,rl_colors.grey),('FONTNAME',(0,3),(-1,3),'Helvetica-Bold'),('FONTNAME',(0,-1),(-1,-1),'Helvetica-Bold')]))
+    
+    bs_data=[['Line Item']+[str(y)for y in years],
+             ['Total Assets']+[f"${financial_data[y]['total_assets']:,.0f}"for y in years],
+             ['Total Liabilities']+[f"${financial_data[y]['total_liab']:,.0f}"for y in years],
+             ['Total Equity']+[f"${financial_data[y]['total_equity']:,.0f}"for y in years]]
+    
+    bs_table=Table(bs_data,colWidths=[2*inch]+[1.2*inch]*len(years))
+    bs_table.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),rl_colors.HexColor('#34495E')),
+                                  ('TEXTCOLOR',(0,0),(-1,0),rl_colors.whitesmoke),
+                                  ('ALIGN',(0,0),(-1,-1),'CENTER'),
+                                  ('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),
+                                  ('FONTSIZE',(0,0),(-1,0),12),
+                                  ('BOTTOMPADDING',(0,0),(-1,0),12),
+                                  ('BACKGROUND',(0,1),(-1,-1),rl_colors.HexColor('#ECF0F1')),
+                                  ('GRID',(0,0),(-1,-1),1,rl_colors.black)]))
+    story.append(Paragraph("Balance Sheet",styles['Heading2']))
+    story.append(Spacer(1,0.2*inch))
     story.append(bs_table)
-    story.append(Spacer(1,0.3*inch))
-    story.append(Paragraph("<b>Cash Flow Statement</b>",styles['Heading2']))
-    cf_data=[['',*[str(y)for y in years]],['Cash from Operations',*[f"${financial_data[y]['cffo']:,.0f}"for y in years]],
-             ['Cash from Investing',*[f"${financial_data[y]['cfi']:,.0f}"for y in years]],['Cash from Financing',*[f"${financial_data[y]['cff']:,.0f}"for y in years]],
-             ['Net Change in Cash',*[f"${financial_data[y]['net_cash_change']:,.0f}"for y in years]]]
-    cf_table=Table(cf_data,colWidths=[2.5*inch]+[1.5*inch]*len(years))
-    cf_table.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),rl_colors.HexColor('#1f4e78')),('TEXTCOLOR',(0,0),(-1,0),rl_colors.whitesmoke),
-                                 ('ALIGN',(0,0),(-1,-1),'CENTER'),('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),('BOTTOMPADDING',(0,0),(-1,0),12),
-                                 ('GRID',(0,0),(-1,-1),1,rl_colors.grey),('FONTNAME',(0,-1),(-1,-1),'Helvetica-Bold')]))
-    story.append(cf_table)
+    
     doc.build(story)
-    output.seek(0)
-    return output
+    buffer.seek(0)
+    return buffer
 
-st.title("Three Statements Automation")
-st.write("Please update your GL data set below.")
-uploaded_file=st.file_uploader("Upload your file",type=['csv','xlsx','xls'],help="Drag and drop file here • CSV, XLSX, XLS")
-
-if uploaded_file is not None:
+def generate_ai_recommendations(financial_data, years):
+    """Generate AI-powered recommendations using Claude"""
     try:
-        df=pd.read_csv(uploaded_file)if uploaded_file.name.endswith('.csv')else pd.read_excel(uploaded_file)
-        st.session_state.uploaded_data=df
-        df=convert_to_usd(df)
-        st.session_state.uploaded_data=df
-        st.success(f"✓ Loaded {len(df):,} transactions")
-        with st.expander("📋 Preview Data",expanded=False):
-            st.dataframe(df.head(20),use_container_width=True)
+        client = Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
+        latest_year = years[-1]
+        
+        # Calculate additional metrics
+        opex = financial_data[latest_year]['salaries'] + financial_data[latest_year]['rent'] + financial_data[latest_year]['marketing'] + financial_data[latest_year]['it_expense']
+        debt_to_equity = financial_data[latest_year]['total_liab'] / financial_data[latest_year]['total_equity'] if financial_data[latest_year]['total_equity'] > 0 else 0
+        
+        prompt = f"""You are a financial analyst reviewing a company's financial statements. Analyze the following data and provide 4-6 specific, actionable recommendations:
+
+**{latest_year} Financial Performance:**
+
+Income Statement:
+- Revenue: ${financial_data[latest_year]['revenue']:,.0f}
+- COGS: ${financial_data[latest_year]['cogs']:,.0f}
+- Gross Profit: ${financial_data[latest_year]['gross_profit']:,.0f}
+- Gross Margin: {financial_data[latest_year]['gross_margin']:.1f}%
+- Operating Expenses: ${opex:,.0f}
+- EBIT: ${financial_data[latest_year]['ebit']:,.0f}
+- EBIT Margin: {financial_data[latest_year]['ebit_margin']:.1f}%
+- Net Income: ${financial_data[latest_year]['net_income']:,.0f}
+- Net Margin: {financial_data[latest_year]['net_margin']:.1f}%
+
+Balance Sheet:
+- Total Assets: ${financial_data[latest_year]['total_assets']:,.0f}
+- Total Liabilities: ${financial_data[latest_year]['total_liab']:,.0f}
+- Total Equity: ${financial_data[latest_year]['total_equity']:,.0f}
+- Debt-to-Equity Ratio: {debt_to_equity:.2f}x
+
+Cash Flow:
+- Cash from Operations: ${financial_data[latest_year]['cffo']:,.0f}
+- Capital Expenditures: ${financial_data[latest_year]['capex']:,.0f}
+- Dividends Paid: ${financial_data[latest_year]['dividends']:,.0f}
+
+Provide recommendations in the following format:
+
+### 🎯 Key Recommendations
+
+Use markdown bullet points. Focus on:
+1. Revenue growth opportunities
+2. Cost optimization strategies
+3. Working capital management
+4. Profitability improvements
+5. Financial health and risk management
+
+Keep each recommendation to 1-2 sentences and be specific with numbers where relevant."""
+
+        message = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1500,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+        return message.content[0].text
+        
     except Exception as e:
-        st.error(f"Error loading file: {str(e)}")
-        st.stop()
-    
-    st.markdown("---")
-    st.subheader("Data Validation")
-    
-    if not st.session_state.validation_complete:
-        with st.spinner("Running validation checks..."):
+        return f"""### ⚠️ AI Recommendations Unavailable
+
+Could not generate AI recommendations: {str(e)}
+
+**Please check:**
+- ANTHROPIC_API_KEY is set in your .env file
+- API key starts with 'sk-ant-'
+- You have an active internet connection
+
+**Manual Analysis Suggestions:**
+- Review gross margin vs industry benchmarks
+- Analyze operating expense trends
+- Monitor cash flow from operations
+- Evaluate debt levels and interest coverage"""
+
+st.title("📊 Three Statements Automation")
+st.markdown("Transform your General Ledger into Income Statement, Balance Sheet, and Cash Flow Statement")
+
+uploaded_file=st.file_uploader("📤 Upload GL Dataset (Excel or CSV)",type=['xlsx','xls','csv'],help="Upload your transaction data")
+
+if uploaded_file:
+    try:
+        df=pd.read_excel(uploaded_file)if uploaded_file.name.endswith(('.xlsx','.xls'))else pd.read_csv(uploaded_file)
+        st.session_state.uploaded_data=df.copy()
+        
+        with st.expander("📋 Data Preview",expanded=True):
+            st.markdown(f"**Loaded {len(df):,} transactions** with {len(df.columns)} columns")
+            st.dataframe(df.head(20),use_container_width=True)
+        
+        df=convert_to_usd(df)
+        
+        if not st.session_state.validation_complete:
+            st.markdown("---")
+            st.subheader("🔍 Data Validation")
             issues=validate_data_detailed(df)
             st.session_state.issues=issues
-            for idx in range(len(issues)):
-                if f'issue_{idx}' not in st.session_state.issue_selections:
-                    st.session_state.issue_selections[f'issue_{idx}']=True
+            
+            if len(issues)==0:
+                st.markdown('<div class="success-box">✅ <strong>No issues found!</strong> Dataset is ready for processing.</div>',unsafe_allow_html=True)
+                st.session_state.validation_complete=True
+            else:
+                critical=sum(1 for i in issues if i['severity']=='Critical')
+                warning=sum(1 for i in issues if i['severity']=='Warning')
+                info=sum(1 for i in issues if i['severity']=='Info')
+                
+                col1,col2,col3=st.columns(3)
+                col1.metric("🔴 Critical",critical)
+                col2.metric("🟡 Warnings",warning)
+                col3.metric("🔵 Info",info)
+                
+                st.markdown("### Issues Detected")
+                for idx,issue in enumerate(issues):
+                    severity_class={'Critical':'validation-critical','Warning':'validation-warning','Info':'validation-info'}.get(issue['severity'],'validation-info')
+                    with st.expander(f"{'🔴' if issue['severity']=='Critical' else '🟡' if issue['severity']=='Warning' else '🔵'} {issue['issue']}",expanded=issue['severity']=='Critical'):
+                        st.markdown(f"<div class='{severity_class}'><strong>Category:</strong> {issue['category']}<br><strong>Impact:</strong> {issue['impact']}<br><strong>Suggestion:</strong> {issue['suggestion']}</div>",unsafe_allow_html=True)
+                        if issue['auto_fix']:
+                            st.session_state.issue_selections[f'issue_{idx}']=st.checkbox(f"✓ Auto-fix: {issue['suggestion']}",key=f"fix_{idx}",value=True)
+                        if 'sample_data' in issue and issue['sample_data'] is not None and len(issue['sample_data'])>0:
+                            st.markdown("**Sample Data:**")
+                            st.dataframe(issue['sample_data'],use_container_width=True)
+                
+                col1,col2=st.columns(2)
+                with col1:
+                    if st.button("✓ Accept AI Fixes",type="primary",use_container_width=True):
+                        df_clean,fixes_applied,log=apply_selected_fixes(df,issues,st.session_state.issue_selections)
+                        st.session_state.data_cleaned=df_clean
+                        st.session_state.changes_log=log
+                        st.session_state.validation_complete=True
+                        st.success(f"✅ Applied {len(fixes_applied)} fixes")
+                        for fix in fixes_applied:
+                            st.markdown(f"- {fix}")
+                        st.rerun()
+                with col2:
+                    if st.button("✗ Decline & Continue",use_container_width=True):
+                        st.session_state.data_cleaned=df.copy()
+                        st.session_state.validation_complete=True
+                        st.info("⚠️ Proceeding without fixes")
+                        st.rerun()
         
-        if len(issues)==0:
-            st.markdown('<div class="success-box"><b>✅ All validation checks passed!</b></div>',unsafe_allow_html=True)
-            st.session_state.validation_complete=True
-            st.session_state.data_cleaned=df
-        else:
-            st.warning(f"⚠️ Found {len(issues)} issue(s)")
-            categories={}
-            for issue in issues:
-                cat=issue['category']
-                if cat not in categories:
-                    categories[cat]=[]
-                categories[cat].append(issue)
+        if st.session_state.validation_complete and not st.session_state.model_generated:
+            st.markdown("---")
+            if st.button("🚀 Generate 3-Statement Model",type="primary",use_container_width=True):
+                with st.spinner("🔄 Processing financial data..."):
+                    df_clean=st.session_state.data_cleaned if st.session_state.data_cleaned is not None else df.copy()
+                    financial_data=calculate_financial_statements(df_clean)
+                    st.session_state.financial_data=financial_data
+                    recon=generate_reconciliation(st.session_state.uploaded_data,df_clean,financial_data)
+                    st.session_state.data_reconciliation=recon
+                    st.session_state.model_generated=True
+                    st.rerun()
+        
+        if st.session_state.model_generated and st.session_state.financial_data:
+            financial_data=st.session_state.financial_data
+            years=sorted(financial_data.keys())
             
-            for cat,cat_issues in categories.items():
-                st.markdown(f"**{cat} ({len(cat_issues)} issue(s))**")
-                for issue in cat_issues:
-                    issue_idx=issues.index(issue)
-                    col1,col2=st.columns([0.95,0.05])
-                    with col1:
-                        severity_map={'Critical':'🔴','Warning':'🟡','Info':'🔵'}
-                        with st.expander(f"{severity_map[issue['severity']]} {issue['issue']}",expanded=False):
-                            st.markdown(f"**Impact:** {issue['impact']}")
-                            st.info(f"💡 **Suggestion:** {issue['suggestion']}")
-                            if issue['total_affected']>0:
-                                st.markdown(f"**Affected Rows:** {issue['total_affected']} total")
-                                if len(issue['affected_rows'])>0:
-                                    st.write(f"Row indices: {', '.join(map(str,issue['affected_rows'][:100]))}")
-                            if issue['sample_data'] is not None and not issue['sample_data'].empty:
-                                st.markdown("**Sample Data:**")
-                                st.dataframe(issue['sample_data'],use_container_width=True)
-                    with col2:
-                        st.checkbox("Fix",value=st.session_state.issue_selections.get(f'issue_{issue_idx}',True),
-                                   key=f'issue_{issue_idx}',help="Check to apply fix",label_visibility="collapsed")
+            st.markdown("---")
+            st.success("✅ Financial statements generated successfully!")
             
-            for idx in range(len(issues)):
-                if f'issue_{idx}' in st.session_state:
-                    st.session_state.issue_selections[f'issue_{idx}']=st.session_state[f'issue_{idx}']
+            st.markdown("### Income Statement")
+            is_rows=[('Revenue','revenue'),('Cost of Goods Sold','cogs'),('─'*50,None),('Gross Profit','gross_profit'),
+                    ('',None),('Operating Expenses:',None),('  Salaries','salaries'),('  Rent','rent'),
+                    ('  Marketing','marketing'),('  IT & Technology','it_expense'),('─'*50,None),
+                    ('EBIT','ebit'),('  Interest Expense','interest'),('─'*50,None),('EBT','ebt'),
+                    ('  Income Tax','tax'),('─'*50,None),('NET INCOME','net_income')]
+            is_data=[]
+            for label,key in is_rows:
+                if key is None:
+                    row={'Line Item':label}
+                    for year in years:
+                        row[str(year)]=''
+                else:
+                    row={'Line Item':label}
+                    for year in years:
+                        row[str(year)]=f"${financial_data[year][key]:,.0f}"
+                is_data.append(row)
+            st.dataframe(pd.DataFrame(is_data),use_container_width=True,hide_index=True)
             
+            st.markdown("### Balance Sheet")
+            bs_rows=[('ASSETS',None),('Current Assets:',None),('  Cash','cash'),('  Accounts Receivable','ar'),
+                    ('  Inventory','inventory'),('Non-Current Assets:',None),('  Property, Plant & Equipment','ppe_net'),
+                    ('─'*50,None),('TOTAL ASSETS','total_assets'),('',None),('LIABILITIES',None),
+                    ('Current Liabilities:',None),('  Accounts Payable','ap'),('  Accrued Expenses','accrued'),
+                    ('Non-Current Liabilities:',None),('  Long-term Debt','long_term_debt'),('─'*50,None),
+                    ('TOTAL LIABILITIES','total_liab'),('',None),('EQUITY',None),
+                    ('  Common Stock','common_stock'),('  Retained Earnings','retained_earnings'),('─'*50,None),('TOTAL EQUITY','total_equity'),('',None),
+                    ('TOTAL LIAB + EQUITY',None)]
+            bs_data=[]
+            for label,key in bs_rows:
+                if key is None:
+                    row={'Line Item':label}
+                    for year in years:
+                        row[str(year)]=''
+                else:
+                    row={'Line Item':label}
+                    for year in years:
+                        row[str(year)]=f"${financial_data[year][key]:,.0f}"
+                bs_data.append(row)
+            st.dataframe(pd.DataFrame(bs_data),use_container_width=True,hide_index=True)
+            
+            st.markdown("### Cash Flow Statement")
+            cf_rows=[('Operating Activities:',None),('  Net Income','net_income'),('  Depreciation','depreciation'),('  Change in Working Capital',None),
+                    ('─'*50,None),('Cash from Operations','cffo'),('',None),('Investing Activities:',None),('  Capital Expenditures','capex'),('─'*50,None),
+                    ('Cash from Investing','cfi'),('',None),('Financing Activities:',None),('  Dividends Paid','dividends'),('─'*50,None),
+                    ('Cash from Financing','cff'),('',None),('─'*50,None),('Net Change in Cash','net_cash_change')]
+            cf_data=[]
+            for label,key in cf_rows:
+                if key is None:
+                    row={'Line Item':label}
+                    for year in years:
+                        row[str(year)]=''
+                else:
+                    row={'Line Item':label}
+                    for year in years:
+                        row[str(year)]=f"${financial_data[year][key]:,.0f}"
+                cf_data.append(row)
+            st.dataframe(pd.DataFrame(cf_data),use_container_width=True,hide_index=True)
+            
+            st.markdown("---")
+            st.subheader("🔍 Dataset Reconciliation")
+            recon=st.session_state.data_reconciliation
+            col1,col2,col3=st.columns(3)
+            with col1:
+                st.metric("Original Transactions",f"{recon['original_summary']['total_transactions']:,}")
+            with col2:
+                st.metric("Cleaned Transactions",f"{recon['cleaned_summary']['total_transactions']:,}")
+            with col3:
+                removed=recon['original_summary']['total_transactions']-recon['cleaned_summary']['total_transactions']
+                st.metric("Removed",f"{removed:,}")
+            
+            if len(st.session_state.changes_log)>0:
+                st.markdown("**Changes Made:**")
+                changes_df=pd.DataFrame(st.session_state.changes_log)
+                st.dataframe(changes_df,use_container_width=True)
+                changes_csv=changes_df.to_csv(index=False)
+                st.download_button(label="📥 Download Reconciliation Report",data=changes_csv,
+                                 file_name=f"reconciliation_{datetime.now().strftime('%Y%m%d')}.csv",mime="text/csv",use_container_width=True)
+            
+            st.markdown("---")
+            st.subheader("🤖 AI-Generated Recommendations")
+            
+            with st.spinner("🤖 Analyzing financial data with Claude..."):
+                ai_recommendations = generate_ai_recommendations(financial_data, years)
+                st.markdown(ai_recommendations)
+            
+            st.markdown("---")
+            st.subheader("📥 Download Reports")
             col1,col2=st.columns(2)
             with col1:
-                if st.button("✓ Accept AI Fixes",type="primary",use_container_width=True):
-                    for idx in range(len(issues)):
-                        st.session_state.issue_selections[f'issue_{idx}']=True
-                    with st.spinner("Applying fixes..."):
-                        df_fixed,fixes=apply_selected_fixes(df,issues,st.session_state.issue_selections)
-                        st.session_state.data_cleaned=df_fixed
-                        st.session_state.validation_complete=True
-                        st.success("Fixes applied!")
-                        for fix in fixes:
-                            st.write(f"  • {fix}")
-                        st.rerun()
+                template_path='3_statement_excel_completed_model.xlsx'
+                if os.path.exists(template_path):
+                    try:
+                        excel_output=update_excel_model(financial_data,template_path)
+                        if excel_output:
+                            st.download_button(label="📊 Download Updated Excel Model",data=excel_output,
+                                             file_name=f"Financial_Model_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
+                        else:
+                            st.error("Failed to generate Excel file")
+                    except Exception as e:
+                        st.error(f"Error: {str(e)}")
+                else:
+                    st.info("📊 Place '3_statement_excel_completed_model.xlsx' in project root to enable download")
             with col2:
-                if st.button("✗ Decline & Continue",use_container_width=True):
-                    for idx in range(len(issues)):
-                        st.session_state.issue_selections[f'issue_{idx}']=False
-                    st.session_state.data_cleaned=df
-                    st.session_state.validation_complete=True
-                    st.info("Proceeding with original data")
-                    st.rerun()
-    
-    if st.session_state.validation_complete and not st.session_state.model_generated:
-        st.markdown("---")
-        st.subheader("Generate Financial Model")
-        if st.button("🚀 Generate 3-Statement Model",type="primary",use_container_width=True):
-            with st.spinner("Processing financial data..."):
-                df_clean=st.session_state.data_cleaned
-                financial_data=calculate_financial_statements(df_clean)
-                st.session_state.financial_data=financial_data
-                recon=generate_reconciliation(st.session_state.uploaded_data,df_clean,financial_data)
-                st.session_state.data_reconciliation=recon
-                st.session_state.model_generated=True
-                st.success("✓ Financial model generated!")
-                st.rerun()
-    
-    if st.session_state.model_generated:
-        financial_data=st.session_state.financial_data
-        years=sorted(financial_data.keys())
-        
-        st.markdown("---")
-        st.subheader("📊 Three Statement Model")
-        st.caption("USD millions")
-        
-        st.markdown("### Income Statement")
-        is_rows=[('Revenue','revenue'),('Cost of Goods Sold','cogs'),('─'*50,None),('Gross Profit','gross_profit'),('',None),('Operating Expenses:',None),
-                 ('  Salaries','salaries'),('  Rent','rent'),('  Marketing','marketing'),('  IT Expense','it_expense'),('  Travel','travel'),
-                 ('  Depreciation','depreciation'),('  Other Operating Expenses','other_opex'),('─'*50,None),('Total Operating Expenses','total_opex'),
-                 ('',None),('EBIT','ebit'),('Interest Expense','interest'),('─'*50,None),('EBT','ebt'),('Income Tax','tax'),('─'*50,None),('Net Income','net_income')]
-        is_data=[]
-        for label,key in is_rows:
-            if key is None:
-                row={'Line Item':label}
-                for year in years:
-                    row[str(year)]=''
-            else:
-                row={'Line Item':label}
-                for year in years:
-                    row[str(year)]=f"${financial_data[year][key]:,.0f}"
-            is_data.append(row)
-        st.dataframe(pd.DataFrame(is_data),use_container_width=True,hide_index=True)
-        
-        st.markdown("### Balance Sheet")
-        bs_rows=[('ASSETS',None),('Current Assets:',None),('  Cash','cash'),('  Accounts Receivable','ar'),('  Inventory','inventory'),
-                ('  Other Current Assets','other_current_assets'),('─'*50,None),('Total Current Assets','current_assets'),('',None),('Fixed Assets:',None),
-                ('  PP&E (Net)','ppe_net'),('  Other Fixed Assets','other_fixed_assets'),('─'*50,None),('Total Fixed Assets','fixed_assets'),('',None),
-                ('TOTAL ASSETS','total_assets'),('',None),('LIABILITIES',None),('Current Liabilities:',None),('  Accounts Payable','ap'),
-                ('  Accrued Expenses','accrued'),('  Other Current Liabilities','other_current_liab'),('─'*50,None),('Total Current Liabilities','current_liab'),
-                ('',None),('Long-term Debt','long_term_debt'),('─'*50,None),('TOTAL LIABILITIES','total_liab'),('',None),('EQUITY',None),
-                ('  Common Stock','common_stock'),('  Retained Earnings','retained_earnings'),('─'*50,None),('TOTAL EQUITY','total_equity'),('',None),
-                ('TOTAL LIABILITIES & EQUITY','total_assets')]
-        bs_data=[]
-        for label,key in bs_rows:
-            if key is None:
-                row={'Line Item':label}
-                for year in years:
-                    row[str(year)]=''
-            else:
-                row={'Line Item':label}
-                for year in years:
-                    row[str(year)]=f"${financial_data[year][key]:,.0f}"
-            bs_data.append(row)
-        st.dataframe(pd.DataFrame(bs_data),use_container_width=True,hide_index=True)
-        
-        st.markdown("### Cash Flow Statement")
-        cf_rows=[('Operating Activities:',None),('  Net Income','net_income'),('  Depreciation','depreciation'),('  Change in Working Capital',None),
-                ('─'*50,None),('Cash from Operations','cffo'),('',None),('Investing Activities:',None),('  Capital Expenditures','capex'),('─'*50,None),
-                ('Cash from Investing','cfi'),('',None),('Financing Activities:',None),('  Dividends Paid','dividends'),('─'*50,None),
-                ('Cash from Financing','cff'),('',None),('─'*50,None),('Net Change in Cash','net_cash_change')]
-        cf_data=[]
-        for label,key in cf_rows:
-            if key is None:
-                row={'Line Item':label}
-                for year in years:
-                    row[str(year)]=''
-            else:
-                row={'Line Item':label}
-                for year in years:
-                    row[str(year)]=f"${financial_data[year][key]:,.0f}"
-            cf_data.append(row)
-        st.dataframe(pd.DataFrame(cf_data),use_container_width=True,hide_index=True)
-        
-        st.markdown("---")
-        st.subheader("🔍 Dataset Reconciliation")
-        recon=st.session_state.data_reconciliation
-        col1,col2,col3=st.columns(3)
-        with col1:
-            st.metric("Original Transactions",f"{recon['original_summary']['total_transactions']:,}")
-        with col2:
-            st.metric("Cleaned Transactions",f"{recon['cleaned_summary']['total_transactions']:,}")
-        with col3:
-            removed=recon['original_summary']['total_transactions']-recon['cleaned_summary']['total_transactions']
-            st.metric("Removed",f"{removed:,}")
-        
-        if len(st.session_state.changes_log)>0:
-            st.markdown("**Changes Made:**")
-            changes_df=pd.DataFrame(st.session_state.changes_log)
-            st.dataframe(changes_df,use_container_width=True)
-            changes_csv=changes_df.to_csv(index=False)
-            st.download_button(label="📥 Download Reconciliation Report",data=changes_csv,
-                             file_name=f"reconciliation_{datetime.now().strftime('%Y%m%d')}.csv",mime="text/csv",use_container_width=True)
-        
-        st.markdown("---")
-        st.subheader("🤖 AI-Generated Summary")
-        latest_year=years[-1]
-        summary=f"""
-### Executive Summary
-Based on analysis of {recon['cleaned_summary']['total_transactions']:,} transactions across {len(years)} years, 
-the company demonstrates {'strong' if financial_data[latest_year]['net_margin']>15 else 'moderate'} financial performance.
-
-### Key Findings
-**Revenue Performance:**
-- Latest year revenue: ${financial_data[latest_year]['revenue']:,.0f}
-- Gross margin: {financial_data[latest_year]['gross_margin']:.1f}%
-- EBIT margin: {financial_data[latest_year]['ebit_margin']:.1f}%
-
-**Profitability:**
-- Net income: ${financial_data[latest_year]['net_income']:,.0f}
-- Net margin: {financial_data[latest_year]['net_margin']:.1f}%
-
-**Balance Sheet Strength:**
-- Total assets: ${financial_data[latest_year]['total_assets']:,.0f}
-- Total liabilities: ${financial_data[latest_year]['total_liab']:,.0f}
-- Total equity: ${financial_data[latest_year]['total_equity']:,.0f}
-- Debt-to-equity: {(financial_data[latest_year]['total_liab']/financial_data[latest_year]['total_equity']):.2f}x
-
-### Recommendations
-"""
-        if financial_data[latest_year]['gross_margin']<40:
-            summary+="- **Improve margins**: Consider supplier negotiations or pricing adjustments\n"
-        if financial_data[latest_year]['net_margin']<10:
-            summary+="- **Control costs**: Operating expenses are high relative to revenue\n"
-        st.markdown(summary)
-        
-        st.markdown("---")
-        st.subheader("📥 Download Reports")
-        col1,col2=st.columns(2)
-        with col1:
-            template_path='3_statement_excel_completed_model.xlsx'
-            if os.path.exists(template_path):
                 try:
-                    excel_output=update_excel_model(financial_data,template_path)
-                    if excel_output:
-                        st.download_button(label="📊 Download Updated Excel Model",data=excel_output,
-                                         file_name=f"Financial_Model_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
-                    else:
-                        st.error("Failed to generate Excel file")
+                    pdf_output=generate_pdf_report(financial_data,recon)
+                    st.download_button(label="📄 Download Summary Report in PDF",data=pdf_output,
+                                     file_name=f"Financial_Summary_{datetime.now().strftime('%Y%m%d')}.pdf",mime="application/pdf",use_container_width=True)
                 except Exception as e:
-                    st.error(f"Error: {str(e)}")
-            else:
-                st.info("📊 Place '3_statement_excel_completed_model.xlsx' in project root to enable download")
-        with col2:
-            try:
-                pdf_output=generate_pdf_report(financial_data,recon)
-                st.download_button(label="📄 Download Summary Report in PDF",data=pdf_output,
-                                 file_name=f"Financial_Summary_{datetime.now().strftime('%Y%m%d')}.pdf",mime="application/pdf",use_container_width=True)
-            except Exception as e:
-                st.error(f"Error generating PDF: {str(e)}")
+                    st.error(f"Error generating PDF: {str(e)}")
+
+    except Exception as e:
+        st.error(f"Error loading file: {str(e)}")
+        st.info("Please ensure your file has the correct format (TxnDate, AccountNumber, AccountName, Debit, Credit, Currency)")
 
 else:
     st.info("👆 Upload a GL dataset to begin")
+
 if uploaded_file is None:
     st.markdown("📌 **Sample format below (more formats coming soon).**")
-
+    
     sample_data = pd.DataFrame({
         "TxnDate": ["2023-01-05", "2023-01-08", "2023-01-12"],
         "AccountNumber": [4001, 6100, 1001],
@@ -563,7 +600,7 @@ if uploaded_file is None:
         "Credit": [5200.00, 0.00, 1800.00],
         "Currency": ["USD", "USD", "USD"]
     })
-
+    
     st.dataframe(sample_data, use_container_width=True)
 
 st.markdown("---")
