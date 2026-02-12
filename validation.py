@@ -83,172 +83,6 @@ def check_required_columns(df: pd.DataFrame,
     return len(missing) == 0, missing
 
 
-def validate_strict_usd(df: pd.DataFrame) -> List[Dict]:
-    """
-    Strict USD validation - BLOCKS if multi-currency or non-USD
-    
-    Args:
-        df: DataFrame to validate
-    
-    Returns:
-        List of validation issues (critical if not USD-only)
-    """
-    issues = []
-    
-    if 'Currency' not in df.columns:
-        # No currency column - warn but assume USD
-        issues.append({
-            'severity': 'Warning',
-            'category': 'Currency',
-            'issue': 'Currency column not found - assuming USD',
-            'impact': 'All amounts assumed to be in USD',
-            'suggestion': 'Add Currency column to your data for clarity',
-            'auto_fix': None,
-            'affected_rows': [],
-            'total_affected': 0,
-        })
-        return issues
-    
-    # Check for multiple currencies
-    currencies = df['Currency'].dropna().unique()
-    
-    if len(currencies) == 0:
-        # All null - assume USD
-        issues.append({
-            'severity': 'Warning',
-            'category': 'Currency',
-            'issue': 'Currency column is empty - assuming USD',
-            'impact': 'All amounts assumed to be in USD',
-            'suggestion': 'Populate Currency column with USD',
-            'auto_fix': None,
-            'affected_rows': [],
-            'total_affected': 0,
-        })
-    elif len(currencies) > 1 or (len(currencies) == 1 and currencies[0].upper() != 'USD'):
-        # Multiple currencies or non-USD - CRITICAL ERROR (blocks generation)
-        currency_list = ', '.join([str(c) for c in currencies])
-        issues.append({
-            'severity': 'Critical',
-            'category': 'Currency',
-            'issue': f'Multiple currencies or non-USD detected: {currency_list}',
-            'impact': 'STRICT MODE: Only USD is supported',
-            'suggestion': 'Convert all amounts to USD before uploading, or filter to USD-only transactions',
-            'auto_fix': None,
-            'affected_rows': [],
-            'total_affected': len(df),
-            'detail': f'Currencies found: {currency_list}. This app operates in STRICT USD MODE and cannot process multi-currency data.'
-        })
-    
-    return issues
-
-
-def validate_debit_credit(df: pd.DataFrame) -> List[Dict]:
-    """
-    Validate Debit and Credit columns
-    
-    Rules:
-    - Both must be numeric
-    - Both must be >= 0
-    - A row cannot have both Debit > 0 AND Credit > 0
-    - Rows with both = 0 should be warned (optional to drop)
-    
-    Args:
-        df: DataFrame to validate
-    
-    Returns:
-        List of validation issues
-    """
-    issues = []
-    
-    if 'Debit' not in df.columns or 'Credit' not in df.columns:
-        return issues  # Already caught by required columns check
-    
-    # Check if numeric
-    try:
-        df['Debit'] = pd.to_numeric(df['Debit'], errors='coerce')
-        df['Credit'] = pd.to_numeric(df['Credit'], errors='coerce')
-    except:
-        issues.append({
-            'severity': 'Critical',
-            'category': 'Data Quality',
-            'issue': 'Debit or Credit columns contain non-numeric values',
-            'impact': 'Cannot calculate balances',
-            'suggestion': 'Ensure Debit and Credit contain only numbers',
-            'auto_fix': None,
-            'affected_rows': [],
-            'total_affected': 0,
-        })
-        return issues
-    
-    # Check for negative values
-    negative_debit = df['Debit'] < 0
-    negative_credit = df['Credit'] < 0
-    
-    if negative_debit.sum() > 0:
-        rows = df[negative_debit].index.tolist()
-        issues.append({
-            'severity': 'Critical',
-            'category': 'Data Quality',
-            'issue': f'{negative_debit.sum()} rows have negative Debit values',
-            'impact': 'Debits must be >= 0',
-            'suggestion': 'Convert negative debits to positive or review data integrity',
-            'auto_fix': 'abs_debit',
-            'affected_rows': rows[:100],
-            'total_affected': len(rows),
-            'sample_data': df[negative_debit].head(10),
-        })
-    
-    if negative_credit.sum() > 0:
-        rows = df[negative_credit].index.tolist()
-        issues.append({
-            'severity': 'Critical',
-            'category': 'Data Quality',
-            'issue': f'{negative_credit.sum()} rows have negative Credit values',
-            'impact': 'Credits must be >= 0',
-            'suggestion': 'Convert negative credits to positive or review data integrity',
-            'auto_fix': 'abs_credit',
-            'affected_rows': rows[:100],
-            'total_affected': len(rows),
-            'sample_data': df[negative_credit].head(10),
-        })
-    
-    # Check for rows with both Debit > 0 AND Credit > 0
-    both_nonzero = (df['Debit'] > 0) & (df['Credit'] > 0)
-    
-    if both_nonzero.sum() > 0:
-        rows = df[both_nonzero].index.tolist()
-        issues.append({
-            'severity': 'Critical',
-            'category': 'Data Quality',
-            'issue': f'{both_nonzero.sum()} rows have both Debit > 0 AND Credit > 0',
-            'impact': 'Each row should be single-sided (either debit or credit, not both)',
-            'suggestion': 'Review these rows - typically should be net amount in one column only',
-            'auto_fix': None,
-            'affected_rows': rows[:100],
-            'total_affected': len(rows),
-            'sample_data': df[both_nonzero].head(10),
-        })
-    
-    # Check for rows with both = 0 (warning only)
-    both_zero = (df['Debit'] == 0) & (df['Credit'] == 0)
-    
-    if both_zero.sum() > 0:
-        rows = df[both_zero].index.tolist()
-        issues.append({
-            'severity': 'Warning',
-            'category': 'Data Quality',
-            'issue': f'{both_zero.sum()} rows have both Debit = 0 AND Credit = 0',
-            'impact': 'These rows have no financial impact',
-            'suggestion': 'Consider removing these zero-amount rows',
-            'auto_fix': 'remove_zero_rows',
-            'affected_rows': rows[:100],
-            'total_affected': len(rows),
-            'sample_data': df[both_zero].head(10),
-        })
-    
-    return issues
-
-
 def validate_trial_balance(df: pd.DataFrame, 
                            tolerance_abs: float = 0.01,
                            tolerance_rel: float = 0.0001) -> List[Dict]:
@@ -541,23 +375,22 @@ def validate_common_issues(df: pd.DataFrame) -> List[Dict]:
                 'sample_data': df.loc[rows[:10]],
             })
     
-    # Full-row duplicates (NOT TransactionID duplicates)
-    # TransactionID repeating is NORMAL (journal entries have multiple lines)
-    # Only flag if entire row is duplicated
-    full_row_duplicates = df.duplicated(keep=False)
-    if full_row_duplicates.sum() > 0:
-        rows = df[full_row_duplicates].index.tolist()
-        issues.append({
-            'severity': 'Warning',
-            'category': 'Duplicates',
-            'issue': f'{full_row_duplicates.sum()} full-row duplicate entries detected',
-            'impact': 'May inflate amounts if true duplicates',
-            'suggestion': f'Review and remove {full_row_duplicates.sum()//2} duplicate rows if confirmed',
-            'auto_fix': 'remove_full_row_duplicates',
-            'affected_rows': rows[:100],
-            'total_affected': len(rows),
-            'sample_data': df[full_row_duplicates].head(10),
-        })
+    # Duplicates (if TransactionID exists)
+    if 'TransactionID' in df.columns:
+        duplicates = df.duplicated(subset=['TransactionID'], keep=False)
+        if duplicates.sum() > 0:
+            rows = df[duplicates].index.tolist()
+            issues.append({
+                'severity': 'Warning',
+                'category': 'Duplicates',
+                'issue': f'{duplicates.sum()} duplicate transaction IDs',
+                'impact': 'May inflate amounts',
+                'suggestion': f'Remove {duplicates.sum()//2} duplicates',
+                'auto_fix': 'remove_duplicates',
+                'affected_rows': rows[:100],
+                'total_affected': len(rows),
+                'sample_data': df[duplicates].sort_values(by='TransactionID').head(10),
+            })
     
     # Future dates
     if 'TxnDate' in df.columns:
@@ -637,34 +470,12 @@ def apply_auto_fixes(df: pd.DataFrame,
         if count > 0:
             changes.append(f'Fixed {count} invalid account numbers')
     
-    if 'remove_full_row_duplicates' in selected_fixes:
+    if 'remove_duplicates' in selected_fixes and 'TransactionID' in df.columns:
         before = len(df)
-        df = df.drop_duplicates(keep='first')
+        df = df.drop_duplicates(subset=['TransactionID'], keep='first')
         removed = before - len(df)
         if removed > 0:
-            changes.append(f'Removed {removed} full-row duplicate entries')
-    
-    if 'abs_debit' in selected_fixes:
-        negative = df['Debit'] < 0
-        count = negative.sum()
-        df.loc[negative, 'Debit'] = df.loc[negative, 'Debit'].abs()
-        if count > 0:
-            changes.append(f'Converted {count} negative Debit values to positive')
-    
-    if 'abs_credit' in selected_fixes:
-        negative = df['Credit'] < 0
-        count = negative.sum()
-        df.loc[negative, 'Credit'] = df.loc[negative, 'Credit'].abs()
-        if count > 0:
-            changes.append(f'Converted {count} negative Credit values to positive')
-    
-    if 'remove_zero_rows' in selected_fixes:
-        before = len(df)
-        both_zero = (df['Debit'] == 0) & (df['Credit'] == 0)
-        df = df[~both_zero]
-        removed = before - len(df)
-        if removed > 0:
-            changes.append(f'Removed {removed} zero-amount rows')
+            changes.append(f'Removed {removed} duplicate transactions')
     
     if 'remove_future_dates' in selected_fixes:
         before = len(df)
@@ -674,3 +485,34 @@ def apply_auto_fixes(df: pd.DataFrame,
             changes.append(f'Removed {removed} future-dated transactions')
     
     return df, changes
+
+
+def validate_year0_opening_snapshot(tb_df: pd.DataFrame, statement_years: int = 3) -> List[str]:
+    '''
+    Strict-mode validation: require an opening-balance Year0 snapshot in TB.
+
+    Expectation:
+      - Statement years are the latest `statement_years` years present in the dataset.
+      - Year0 is (first statement year - 1) and must be present in TB.
+      - TB can include monthly snapshots; we only require at least one TxnDate in Year0.
+    Returns:
+      - List[str] issues (empty if OK)
+    '''
+    issues: List[str] = []
+    df = tb_df.copy()
+    df = normalize_column_headers(df)
+    if 'TxnDate' not in df.columns:
+        return ['TB: missing TxnDate column (cannot validate Year0 opening snapshot)']
+    df['TxnDate'] = pd.to_datetime(df['TxnDate'], errors='coerce')
+    df = df[df['TxnDate'].notna()].copy()
+    if df.empty:
+        return ['TB: TxnDate column has no valid dates (cannot validate Year0 opening snapshot)']
+    years = sorted(df['TxnDate'].dt.year.unique())
+    if len(years) < statement_years:
+        return [f"TB: only {len(years)} year(s) found; expected at least {statement_years}+1 (includes Year0) in strict mode"]
+
+    stmt_years = years[-int(statement_years):] if len(years) >= statement_years else years
+    year0 = int(stmt_years[0]) - 1
+    if year0 not in years:
+        issues.append(f"TB: missing Year0 opening snapshot year {year0}. Add prior-year year-end snapshot (at least one row dated in {year0}).")
+    return issues

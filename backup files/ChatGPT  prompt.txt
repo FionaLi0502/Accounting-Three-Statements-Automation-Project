@@ -1,0 +1,471 @@
+Accounting 3-Statement Automation — Handoff Summary (for next chat)
+Ultimate Goal
+Build a robust Streamlit app that:
+
+
+Accepts Trial Balance (TB) and General Ledger (GL) activity inputs (CSV/XLSX),
+
+
+Generates full 3 financial statements (Income Statement, Balance Sheet, Cash Flow Statement GAAP Indirect),
+
+
+Produces:
+
+
+Excel output matching the provided model style (tables with years across the top, line items on the left),
+
+
+PDF export that contains full statement tables with numbers (not just a “key summary”),
+
+
+Optional AI summary that only summarizes the valid / proven-correct parts.
+
+
+
+
+
+Key Business Rules / Assumptions (locked-in)
+TB vs GL roles
+
+
+TB is the driver for statements.
+
+
+TB is treated as ENDING BALANCES (month-end snapshots).
+
+
+GL is mainly for validation (not the primary driver), including:
+
+
+debit/credit balancing checks,
+
+
+optional roll-forward reconciliation between TB month-end snapshots using GL activity.
+
+
+
+
+TB content format
+
+
+Option 1 selected: TB contains monthly ending balances (one snapshot per month-end date), not just beginning and year-end.
+
+
+If TB only has beginning + year-end:
+
+
+still generate annual statements,
+
+
+but show warning: monthly roll-forward validation unavailable (downgraded validation).
+
+
+
+
+Data validation policies
+
+
+Strict currency mode:
+
+
+only one currency allowed (USD),
+
+
+mixed currency = hard stop (critical error), not auto-fixed.
+
+
+
+
+Duplicate detection:
+
+
+Do NOT flag duplicate Transaction IDs.
+
+
+Only flag duplicates when ALL columns match (full-row duplicates).
+
+
+
+
+Unusual amounts detected:
+
+
+INFO only, no auto-fix,
+
+
+show the computing logic as tooltip/help text.
+
+
+
+
+For all fixable issues:
+
+
+UI must include an “Apply this fix” checkbox per issue (user-controlled).
+
+
+
+
+TransactionID is treated as Journal Entry ID:
+
+
+used only for per-transaction balancing (sum of debits must equal sum of credits per transaction).
+
+
+TransactionID is optional in GL; system must work without it.
+
+
+
+
+Units / scaling
+
+
+UI must force user to select unit:
+
+
+default: USD dollars
+
+
+option: USD thousands (dropdown required before generating statements)
+
+
+
+
+Tolerance levels must scale based on unit selection.
+
+
+Multi-year handling
+
+
+No fixed year columns like 2023/2024 hardcoded.
+
+
+Must dynamically detect years from data and generate columns for those years.
+
+
+If less years: remove unused columns / show 0 as needed.
+
+
+If more years: add columns using same formula pattern.
+
+
+Output requirements
+
+
+3 statements output must be full tables with year columns, not just key bullets.
+
+
+PDF must contain:
+
+
+Income Statement table
+
+
+Balance Sheet table
+
+
+Cash Flow Statement table
+
+
+AI Summary page
+
+
+Multiple pages per statement allowed (tables may span pages)
+
+
+
+
+
+Key UI requirements (confirmed for later prompt/code updates)
+
+
+Replace “Use Sample Data” button with “Download Sample Data”:
+
+
+clicking shows 2 options:
+
+
+“Download Sample Trial Balance Data”
+
+
+“Download Sample General Ledger Data”
+
+
+
+
+
+
+Rename GL wording everywhere:
+
+
+“GL Activity” → “General Ledger (GL) Activity”
+
+
+“GL” label should read General Ledger
+
+
+
+
+“Load Random Test Dataset” button:
+
+
+must load BOTH TB + GL as a matched pair (same year range key),
+
+
+prefer GL with TransactionID if available (Option A),
+
+
+otherwise use GL without TransactionID.
+
+
+
+
+
+Project locations (user’s local machine)
+
+
+Current working folder: D:\ai_accounting_agent
+
+
+Older backup folder: D:\ai_accounting_agent\ai_accounting_agent_BACKUP_FEB2026
+
+
+
+Problems we diagnosed (must not repeat)
+
+
+Earlier sample datasets had contradictions:
+
+
+TB looked like monthly activity instead of ending balances → triggered false validation errors and wrong statements.
+
+
+
+
+Earlier dataset sets were only 2 years; requirement is 3 years per file.
+
+
+Earlier sample data produced a loss year; user explicitly requires healthy years (positive NI) (room for improvement but not loss-making).
+
+
+PDF export output was missing numbers / missing statements:
+
+
+Streamlit app was not calling pdf_export.py correctly (called another internal function),
+
+
+tables not rendering with year columns.
+
+
+
+
+Streamlit app had logic mismatch:
+
+
+even if modules like mapping.py updated, the app sometimes used its own hard-coded logic and didn’t import/call updated modules.
+
+
+
+
+
+Files involved (latest set the user uploaded to the chat)
+
+
+streamlit_app.py
+
+
+validation.py
+
+
+mapping.py
+
+
+sample_data.py
+
+
+excel_writer.py
+
+
+pdf_export.py
+
+
+ai_summary.py
+
+
+
+Dataset packaging requirements (critical)
+
+
+Need v6 sample dataset package with:
+
+
+5 sets of TB + GL,
+
+
+each TB and GL file contains 3 years,
+
+
+TB monthly snapshots (month-end),
+
+
+GL transactional activity across months,
+
+
+GL TransactionID column optional,
+
+
+datasets should be “healthy but not too perfect” (positive NI, plausible margins, realistic working capital + capex + debt/dividends),
+
+
+all sample datasets must be clean and trigger no auto-fix required.
+
+
+
+
+Must keep the same internal filenames as v5 so unzip/replace works:
+
+
+backup_tb_2020_2021.csv etc (BUT requirement changed to 3 years per file; need new naming convention decision)
+
+
+backup_gl_YYYY_YYYY_with_txnid.csv and _no_txnid.csv
+
+
+sample_tb.csv, sample_gl_with_txnid.csv, sample_gl_no_txnid.csv
+
+
+templates with same filenames as prior package.
+
+
+
+
+If filenames need to change to reflect 3-year ranges, then:
+
+
+update loader logic to match by header name, not column position,
+
+
+ensure code references updated correctly everywhere.
+
+
+
+
+
+What user requested next (unresolved work)
+
+
+Generate new dataset ZIP that truly meets the 3-year + healthy NI + clean validation requirements.
+
+
+Update code modules (not necessarily Streamlit UI) to ensure:
+
+
+TB treated as ending balances correctly (not summed across monthly snapshots),
+
+
+GL validation works with TransactionID optional,
+
+
+Random loader loads TB+GL pair correctly with same year key,
+
+
+Duplicate logic is full-row only,
+
+
+Unusual amounts is info-only,
+
+
+Strict currency mode blocks mixed currency,
+
+
+PDF export outputs full tables with numbers + all 3 statements.
+
+
+
+
+Provide a reliable way for user to confirm they replaced updated code:
+
+
+add # LAST UPDATED: <date> header comment at top of every updated file,
+
+
+(optional) add an “App Version” string shown in Streamlit UI.
+
+
+
+
+Run tests across all dataset combinations:
+
+
+ensure no major issues or fix prompts,
+
+
+ensure outputs look realistic.
+
+
+
+
+Provide a sample Cash Flow Statement output table (with numbers) as proof.
+
+
+
+Important constraints / style requirements for final deliverable
+
+
+No more “maybe/might” diagnosis — run the code and confirm.
+
+
+No loss years in sample dataset (positive NI each year).
+
+
+3-year per file sample datasets (not 2-year).
+
+
+PDF must show full tables with numbers.
+
+
+Streamlit UI should remain clean; bigger UI redesign can be later.
+
+
+If errors occur, the system must explain exact rule violated and offer checkbox fix where appropriate.
+
+
+TB and GL detection + validation must match header names, not column numbers; if missing column, show warnings.
+
+
+
+Open decision needed in next chat (if still not resolved)
+
+
+Naming convention for 3-year TB/GL backups (since old names like 2020_2021 imply 2 years).
+Options:
+
+
+Keep v5 filenames but internally store 3 years (confusing but “drop-in replace”).
+
+
+Update filenames to 3-year ranges (e.g., backup_tb_2020_2022.csv) and update loader accordingly (cleaner, requires code changes).
+
+
+
+
+User prefers unzip/replace ease, but also demanded 3-year per file, so next chat must decide this explicitly.
+
+If you paste this into the next chat, the next assistant should:
+
+
+decide/confirm the 3-year naming convention,
+
+
+generate clean 3-year datasets (5 sets),
+
+
+update the code modules + ensure Streamlit actually calls them,
+
+
+run full tests,
+
+
+confirm outputs match expectations (including PDF tables).
+
+

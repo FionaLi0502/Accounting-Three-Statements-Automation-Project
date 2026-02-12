@@ -18,7 +18,7 @@ DEFAULT_ACCOUNT_RANGES = {
     'inventory': (1200, 1299),
     'prepaid_expenses': (1300, 1349),
     'other_current_assets': (1350, 1499),
-    'ppe_gross': (1500, 1599),
+    'ppe_gross': (1500, 1589),
     'accumulated_depreciation': (1590, 1599),
     'other_fixed_assets': (1600, 1999),
     
@@ -57,11 +57,11 @@ ACCOUNT_NAME_ALIASES = {
         'bank', 'petty cash', 'cash on hand'
     ],
     'accounts_receivable': [
-        'accounts receivable', 'a/r', 'ar', 'trade receivable', 
+        'accounts receivable', 'a/r', 'trade receivable', 
         'trade and other receivables', 'receivables', 'debtors'
     ],
     'inventory': [
-        'inventory', 'inventories', 'stock', 'merchandise', 
+        'inventory', 'inventories', 'merchandise', 
         'finished goods', 'raw materials', 'work in process', 'wip'
     ],
     'prepaid_expenses': [
@@ -79,12 +79,11 @@ ACCOUNT_NAME_ALIASES = {
     ],
     'accumulated_depreciation': [
         'accumulated depreciation', 'accumulated depr', 'acc depreciation',
-        'depreciation', 'amortization'
-    ],
+            ],
     
     # Liabilities
     'accounts_payable': [
-        'accounts payable', 'a/p', 'ap', 'trade payable', 
+        'accounts payable', 'a/p', 'trade payable', 
         'trade payables', 'payables', 'creditors'
     ],
     'accrued_payroll': [
@@ -202,27 +201,33 @@ def normalize_account_name(name: str) -> str:
 
 def map_account_by_name(account_name: str) -> Optional[str]:
     """
-    Map account to FSLI line item by name matching
-    Returns the FSLI category or None if no match
+    Map account to FSLI line item by safer name matching.
+
+    Matching rules:
+    - Normalize both account name and alias (lowercase, punctuation stripped)
+    - Match alias as a whole phrase with word boundaries (avoids substring traps like 'ar' in 'retained')
+    - Prefer longer aliases first
     """
     if pd.isna(account_name):
         return None
-    
+
     normalized = normalize_account_name(account_name)
-    
+
     # Special handling for accrued liabilities
     if 'accrued' in normalized:
         return classify_accrued_liability(account_name)
-    
-    # Check all aliases
+
+    # Check aliases (longest first) with word-boundary phrase matching
     for fsli_category, aliases in ACCOUNT_NAME_ALIASES.items():
-        for alias in aliases:
-            if alias.lower() in normalized or normalized in alias.lower():
+        for alias in sorted(aliases, key=lambda x: len(x), reverse=True):
+            alias_norm = normalize_account_name(alias)
+            if not alias_norm:
+                continue
+            # Match full phrase with boundaries
+            if re.search(r'\b' + re.escape(alias_norm) + r'\b', normalized):
                 return fsli_category
-    
+
     return None
-
-
 def map_account_by_range(account_number: int, 
                          custom_ranges: Optional[Dict] = None) -> Optional[str]:
     """
@@ -337,6 +342,7 @@ TEMPLATE_LABEL_MAPPING = {
     'Retained Earnings': 'retained_earnings',
     
     # Cash Flow Statement
+    'Common Dividends': 'dividends',
     'Change in Accounts Receivable': 'delta_ar',
     'Change in Inventory': 'delta_inventory',
     'Change in Prepaid Expenses': 'delta_prepaid',
@@ -351,4 +357,7 @@ TEMPLATE_LABEL_MAPPING = {
     'Dividends (current year)': 'dividends',
     'Issuance of Common Stock': 'stock_issuance',
     'Increase/(Decrease) in Long-Term Debt': 'delta_debt',
+    'Cash and Equivalents, Beginning of the Year': 'beginning_cash',
+    'Acquisitions of Property and Equipment': 'capex',
+    'Issuance of Common Stock': 'stock_issuance',
 }

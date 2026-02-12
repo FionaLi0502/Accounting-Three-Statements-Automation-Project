@@ -1,0 +1,18 @@
+UPDATED CODE PACKAGE (Option 1)
+
+This zip contains only the updated python modules (drop-in replacement).
+How to apply:
+1) Unzip this file somewhere temporary.
+2) Copy the .py files into your project folder (e.g., D:\ai_accounting_agent) and overwrite existing files:
+   - streamlit_app.py
+   - validation.py
+   - mapping.py
+   - sample_data.py
+   - excel_writer.py
+   - pdf_export.py
+   - ai_summary.py
+3) Restart Streamlit:
+   streamlit run streamlit_app.py
+
+Notes:
+- This zip does NOT include sample datasets. Use Accounting_3Statement_Assets_Package_v5.zip separately.
