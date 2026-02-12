@@ -7,6 +7,7 @@ TxnDate,AccountNumber,AccountName,Debit,Credit,Currency,PeriodEnd,Description
 2021-12-31,2000,Accounts Payable,0.0,784000000.0,USD,2021-12-31,
 2021-12-31,2000,Accounts Payable,0.0,147000000.0,USD,2021-12-31,
 2021-12-31,2000,Accounts Payable,0.0,110000000.0,USD,2021-12-31,
+2021-12-31,2250,Income Taxes Payable,0.0,68080000.0,,,Provision for income taxes 2021 (offset)
 2021-12-31,3100,Retained Earnings,68376000.0,0.0,USD,2021-12-31,
 2021-12-31,4000,Revenues,0.0,4900000000.0,USD,2021-12-31,
 2021-12-31,5000,Cost of Goods Sold,3038000000.0,0.0,USD,2021-12-31,
@@ -24,6 +25,7 @@ TxnDate,AccountNumber,AccountName,Debit,Credit,Currency,PeriodEnd,Description
 2022-12-31,2000,Accounts Payable,0.0,823200000.0,USD,2022-12-31,
 2022-12-31,2000,Accounts Payable,0.0,154350000.0,USD,2022-12-31,
 2022-12-31,2000,Accounts Payable,0.0,108900000.0,USD,2022-12-31,
+2022-12-31,2250,Income Taxes Payable,0.0,74934000.0,,,Provision for income taxes 2022 (offset)
 2022-12-31,3100,Retained Earnings,75259800.0,0.0,USD,2022-12-31,
 2022-12-31,4000,Revenues,0.0,5145000000.0,USD,2022-12-31,
 2022-12-31,5000,Cost of Goods Sold,3189900000.0,0.0,USD,2022-12-31,
@@ -41,6 +43,7 @@ TxnDate,AccountNumber,AccountName,Debit,Credit,Currency,PeriodEnd,Description
 2023-12-31,2000,Accounts Payable,0.0,862400000.0,USD,2023-12-31,
 2023-12-31,2000,Accounts Payable,0.0,161700000.0,USD,2023-12-31,
 2023-12-31,2000,Accounts Payable,0.0,107800000.0,USD,2023-12-31,
+2023-12-31,2250,Income Taxes Payable,0.0,81788000.0,,,Provision for income taxes 2023 (offset)
 2023-12-31,3100,Retained Earnings,82143600.0,0.0,USD,2023-12-31,
 2023-12-31,4000,Revenues,0.0,5390000000.0,USD,2023-12-31,
 2023-12-31,5000,Cost of Goods Sold,3341800000.0,0.0,USD,2023-12-31,

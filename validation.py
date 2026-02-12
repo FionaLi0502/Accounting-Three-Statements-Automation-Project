@@ -346,7 +346,7 @@ def validate_gl_activity(
                 "issue": f"{len(unbalanced)} transaction(s) do not balance",
                 "impact": "Debits ≠ Credits for these transactions",
                 "suggestion": "Fix the source transactions (or export logic) so each transaction nets to 0",
-                "auto_fix": None,
+                "auto_fix": "balance_transactions",
                 "affected_rows": [],
                 "total_affected": int(len(unbalanced)),
                 "sample_data": unbalanced.head(25)[["TransactionID", "Debit", "Credit", "Difference"]],
@@ -367,7 +367,7 @@ def validate_gl_activity(
             "issue": f"Overall GL out of balance by ${diff:,.2f}",
             "impact": f"Total Debits: ${total_debit:,.2f} ≠ Total Credits: ${total_credit:,.2f}",
             "suggestion": "Check export completeness (missing lines) or parsing of Debit/Credit columns",
-            "auto_fix": None,
+            "auto_fix": "balance_gl_overall",
             "affected_rows": [],
             "total_affected": 0,
         })
@@ -530,6 +530,62 @@ def apply_auto_fixes(df: pd.DataFrame, selected_fixes: List[str]) -> Tuple[pd.Da
         removed = before - len(df)
         if removed > 0:
             changes.append(f"Removed {removed} fully-duplicate row(s) (kept first)")
+
+    # balance_transactions (add a balancing line to Suspense per unbalanced TransactionID)
+    if "balance_transactions" in selected_fixes and "TransactionID" in df.columns:
+        txn_df = df[df["TransactionID"].notna()].copy()
+        if len(txn_df) > 0:
+            grp = txn_df.groupby("TransactionID").agg({"Debit":"sum","Credit":"sum"}).reset_index()
+            grp["Diff"] = grp["Debit"] - grp["Credit"]
+            unb = grp[grp["Diff"].abs() > 0.01]
+            if len(unb) > 0:
+                rows_to_add = []
+                for _, r in unb.iterrows():
+                    tid = r["TransactionID"]
+                    diff = float(r["Diff"])
+                    sample = txn_df[txn_df["TransactionID"]==tid].head(1)
+                    base_row = sample.iloc[0].to_dict() if len(sample)>0 else {}
+                    base_row["AccountNumber"] = 9999
+                    base_row["AccountName"] = "Suspense - Auto Balance"
+                    # add opposite side to make the transaction net to zero
+                    if diff > 0:
+                        base_row["Debit"] = 0.0
+                        base_row["Credit"] = diff
+                    else:
+                        base_row["Debit"] = -diff
+                        base_row["Credit"] = 0.0
+                    base_row["Description"] = f"Auto-balance transaction {tid} to suspense"
+                    rows_to_add.append(base_row)
+                df = pd.concat([df, pd.DataFrame(rows_to_add)], ignore_index=True)
+                changes.append(f"Added {len(unb)} suspense line(s) to auto-balance unbalanced transactions")
+
+    # balance_gl_overall (add one balancing line to Suspense to make total debits == credits)
+    if "balance_gl_overall" in selected_fixes:
+        total_debit = float(df["Debit"].sum(skipna=True)) if "Debit" in df.columns else 0.0
+        total_credit = float(df["Credit"].sum(skipna=True)) if "Credit" in df.columns else 0.0
+        diff = total_debit - total_credit
+        if abs(diff) > 0.01:
+            # choose a date for the balancing line
+            txndate = None
+            if "TxnDate" in df.columns and df["TxnDate"].notna().any():
+                txndate = df["TxnDate"].max()
+            row = {
+                "TxnDate": txndate,
+                "TransactionID": "AUTO-BALANCE" if "TransactionID" in df.columns else None,
+                "AccountNumber": 9999,
+                "AccountName": "Suspense - Auto Balance",
+                "Debit": 0.0,
+                "Credit": 0.0,
+                "Currency": df["Currency"].dropna().iloc[0] if "Currency" in df.columns and df["Currency"].dropna().any() else None,
+                "PeriodEnd": df["PeriodEnd"].dropna().iloc[0] if "PeriodEnd" in df.columns and df["PeriodEnd"].dropna().any() else None,
+                "Description": "Auto-balance overall GL to suspense",
+            }
+            if diff > 0:
+                row["Credit"] = diff
+            else:
+                row["Debit"] = -diff
+            df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
+            changes.append("Added 1 suspense line to auto-balance overall GL debits/credits")
     return df, changes
 
 

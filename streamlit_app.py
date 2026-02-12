@@ -43,6 +43,8 @@ AUTO_FIX_OPTIONS = [
     ("map_unclassified", "Map missing AccountNumber → 9999"),
     ("fix_account_numbers", "Convert negative AccountNumber → positive"),
     ("remove_duplicates", "Remove fully duplicate rows (safe)"),
+    ("balance_transactions", "Auto-balance unbalanced TransactionID(s) → Suspense (demo/testing)"),
+    ("balance_gl_overall", "Auto-balance overall GL difference → Suspense (demo/testing)"),
 ]
 
 UNIT_SCALE_OPTIONS = {
@@ -275,7 +277,10 @@ with st.expander("Validation details", expanded=True):
         st.dataframe(_issues_to_table(tb_issues), use_container_width=True)
         for idx, it in enumerate(tb_issues[:20], start=1):
             with st.expander(f"TB Issue {idx}: {it.get('issue','')}"):
-                st.write(it)
+                st.markdown(f"**Severity:** {it.get('severity','')}  |  **Category:** {it.get('category','')}")
+                if it.get("impact"): st.markdown(f"**Impact:** {it.get('impact')}")
+                if it.get("suggestion"): st.markdown(f"**Suggestion:** {it.get('suggestion')}")
+                if it.get("auto_fix"): st.markdown(f"**Auto-fix option:** `{it.get('auto_fix')}`")
                 if "sample_data" in it and it["sample_data"] is not None:
                     st.dataframe(it["sample_data"], use_container_width=True)
 
@@ -291,7 +296,10 @@ with st.expander("Validation details", expanded=True):
         st.dataframe(_issues_to_table(gl_issues), use_container_width=True)
         for idx, it in enumerate(gl_issues[:20], start=1):
             with st.expander(f"GL Issue {idx}: {it.get('issue','')}"):
-                st.write(it)
+                st.markdown(f"**Severity:** {it.get('severity','')}  |  **Category:** {it.get('category','')}")
+                if it.get("impact"): st.markdown(f"**Impact:** {it.get('impact')}")
+                if it.get("suggestion"): st.markdown(f"**Suggestion:** {it.get('suggestion')}")
+                if it.get("auto_fix"): st.markdown(f"**Auto-fix option:** `{it.get('auto_fix')}`")
                 if "sample_data" in it and it["sample_data"] is not None:
                     st.dataframe(it["sample_data"], use_container_width=True)
 
@@ -374,7 +382,9 @@ if st.button("Generate 3-Statement Outputs", type="primary"):
                 year0_issues = validate_year0_opening_snapshot(tb_df, statement_years=3)
 
             if year0_issues:
-                st.error("Strict mode: Year0 opening snapshot requirement failed:\n" + "\n".join(year0_issues))
+                st.error("Strict mode: Year0 opening snapshot requirement failed:
+" + "
+".join(year0_issues))
                 st.stop()
 
     # Map accounts
