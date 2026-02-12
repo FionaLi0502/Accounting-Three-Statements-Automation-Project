@@ -19,76 +19,82 @@ st.caption("Upload a Trial Balance (BS snapshot) and/or GL activity (IS activity
 ALL_AUTO_FIXES = ["fix_account_numbers", "remove_missing_dates", "remove_future_dates", "remove_duplicates", "map_unclassified"]
 
 with st.sidebar:
-    
-st.header("Demo data")
+    st.header("Demo data")
 
-# 1) Download Sample Financial Model (template demo)
-try:
-    demo_model_path = get_template_path("Financial_Model_SAMPLE_DEMO_USD_thousands_GAAP.xlsx")
-    with open(demo_model_path, "rb") as f:
+    # 1) Download Sample Financial Model (template demo)
+    try:
+        demo_model_path = get_template_path("Financial_Model_SAMPLE_DEMO_USD_thousands_GAAP.xlsx")
+        with open(demo_model_path, "rb") as f:
+            st.download_button(
+                "Download Sample Financial Model",
+                data=f,
+                file_name="Financial_Model_SAMPLE_DEMO_USD_thousands_GAAP.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+    except Exception as e:
+        st.caption(f"Sample model not found: {e}")
+
+    # 2) Download current loaded dataset (TB+GL) if loaded
+    def _zip_bytes_from_dfs(tb_df, gl_df, tb_name="tb.csv", gl_name="gl.csv"):
+        import io, zipfile
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
+            if tb_df is not None:
+                z.writestr(tb_name, tb_df.to_csv(index=False))
+            if gl_df is not None:
+                z.writestr(gl_name, gl_df.to_csv(index=False))
+        buf.seek(0)
+        return buf.getvalue()
+
+    if st.session_state.get('tb_df') is not None and st.session_state.get('gl_df') is not None:
+        tb_name = st.session_state.get('tb_name', 'tb.csv')
+        gl_name = st.session_state.get('gl_name', 'gl.csv')
         st.download_button(
-            "Download Sample Financial Model",
-            data=f,
-            file_name="Financial_Model_SAMPLE_DEMO_USD_thousands_GAAP.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "Download Sample Dataset (TB + GL)",
+            data=_zip_bytes_from_dfs(st.session_state['tb_df'], st.session_state['gl_df'], tb_name, gl_name),
+            file_name=f"sample_dataset_{tb_name.replace('.csv','')}_{gl_name.replace('.csv','')}.zip",
+            mime="application/zip",
             use_container_width=True,
         )
-except Exception as e:
-    st.caption(f"Sample model not found: {e}")
+    else:
+        st.caption("Load a random sample set (TB+GL) to enable dataset download.")
 
-# 2) Download current random dataset (TB+GL) if loaded
-def _zip_bytes_from_dfs(tb_df, gl_df, tb_name="tb.csv", gl_name="gl.csv"):
-    import io, zipfile
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
-        if tb_df is not None:
-            z.writestr(tb_name, tb_df.to_csv(index=False))
-        if gl_df is not None:
-            z.writestr(gl_name, gl_df.to_csv(index=False))
-    buf.seek(0)
-    return buf.getvalue()
+    # 3) Load Random Sample Set (TB + GL together)
+    if st.button("Load Random Sample Set (TB + GL, 3 years)", use_container_width=True):
+        # Pick a matching year range so TB+GL always align
+        ranges = ["2020_2022","2021_2023","2022_2024","2023_2025","2024_2026"]
+        rng = random.choice(ranges)
+        tb_file = f"backup_tb_{rng}.csv"
+        gl_file = f"backup_gl_{rng}_with_txnid.csv"
 
-if st.session_state.get('tb_df') is not None and st.session_state.get('gl_df') is not None:
-    tb_name = st.session_state.get('tb_name', 'tb.csv')
-    gl_name = st.session_state.get('gl_name', 'gl.csv')
-    st.download_button(
-        "Download Sample Dataset (TB + GL)",
-        data=_zip_bytes_from_dfs(st.session_state['tb_df'], st.session_state['gl_df'], tb_name, gl_name),
-        file_name=f"sample_dataset_{tb_name.replace('.csv','')}_{gl_name.replace('.csv','')}.zip",
-        mime="application/zip",
-        use_container_width=True,
-    )
-else:
-    st.caption("Load a random sample set to enable dataset download.")
+        tb_df = pd.read_csv(get_sample_data_path(tb_file))
+        gl_df = pd.read_csv(get_sample_data_path(gl_file))
 
-# 3) Load Random Sample Set (TB + GL together)
-if st.button("Load Random Sample Set (TB + GL, 3 years)", use_container_width=True):
-    # Pick a matching year range so TB+GL always align
-    ranges = ["2020_2022","2021_2023","2022_2024","2023_2025","2024_2026"]
-    rng = random.choice(ranges)
-    tb_file = f"backup_tb_{rng}.csv"
-    gl_file = f"backup_gl_{rng}_with_txnid.csv"
+        st.session_state['tb_df'] = tb_df
+        st.session_state['gl_df'] = gl_df
+        st.session_state['tb_name'] = tb_file
+        st.session_state['gl_name'] = gl_file
+        st.success(f"Loaded: {tb_file} + {gl_file}")
 
-    tb_df = pd.read_csv(get_sample_data_path(tb_file))
-    gl_df = pd.read_csv(get_sample_data_path(gl_file))
-
-    st.session_state['tb_df'] = tb_df
-    st.session_state['gl_df'] = gl_df
-    st.session_state['tb_name'] = tb_file
-    st.session_state['gl_name'] = gl_file
-    st.success(f"Loaded: {tb_file} + {gl_file}")
-
-st.divider()
+    st.divider()
     st.header("Template")
     template_choice = st.selectbox("Excel template", ["ZERO (processing)", "SAMPLE (demo)"])
     template_type = 'zero' if template_choice.startswith('ZERO') else 'demo'
 
     st.divider()
-    unit_scale = st.number_input("Unit scale (divide by)", value=1000.0, help="Template is in USD thousands by default. If your data is in USD, use 1000.")
+    unit_scale = st.number_input(
+        "Unit scale (divide by)",
+        value=1000.0,
+        help="Template is in USD thousands by default. If your data is in USD, use 1000.",
+    )
 
     st.divider()
-    strict_mode = st.checkbox("Strict mode", value=True, help="Strict mode enforces required accounts/categories for realistic 3-statement output.")
-
+    strict_mode = st.checkbox(
+        "Strict mode",
+        value=True,
+        help="Strict mode enforces required accounts/categories for realistic 3-statement output.",
+    )
 col1, col2 = st.columns(2)
 
 with col1:
@@ -131,8 +137,15 @@ def strict_category_check(mapped_df: pd.DataFrame, required: set, dataset_name: 
     return []
 
 if st.button("Generate 3-Statement Outputs", type="primary"):
+    # For a full 3-statement output, we need BOTH: TB (BS snapshot) + GL (IS activity).
+    # In strict mode, we hard-stop if either is missing (per your requirement).
+    if strict_mode and (tb_df is None or gl_df is None):
+        st.error("Strict mode requires BOTH TB and GL. Please load/upload a matched TB+GL set.")
+        st.stop()
+
+    # Non-strict mode can proceed with partial data (useful for debugging), but results may be incomplete.
     if tb_df is None and gl_df is None:
-        st.error("Please upload at least one dataset (TB and/or GL).")
+        st.error("Please upload or load TB and GL data.")
         st.stop()
 
     # Auto-fix common issues
