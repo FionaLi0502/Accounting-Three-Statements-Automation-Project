@@ -28,8 +28,9 @@ from excel_writer import (
     calculate_3statements_from_tb_gl,
     calculate_financial_statements,
     write_financial_data_to_template,
+    compute_reconciliation_checks,
 )
-from sample_data import get_template_path, load_random_backup_set, list_backup_sets
+from sample_data import get_sample_data_path, get_template_path
 
 
 # ----------------------------
@@ -43,8 +44,6 @@ AUTO_FIX_OPTIONS = [
     ("map_unclassified", "Map missing AccountNumber → 9999"),
     ("fix_account_numbers", "Convert negative AccountNumber → positive"),
     ("remove_duplicates", "Remove fully duplicate rows (safe)"),
-    ("balance_transactions", "Auto-balance unbalanced TransactionID(s) → Suspense (demo/testing)"),
-    ("balance_gl_overall", "Auto-balance overall GL difference → Suspense (demo/testing)"),
 ]
 
 UNIT_SCALE_OPTIONS = {
@@ -112,15 +111,18 @@ def run_validation():
 
 
 def load_random_set():
-    """Load a random matched TB + GL backup pack (A1 policy: packs must exist)."""
-    try:
-        tb_df, gl_df, dataset_name = load_random_backup_set(with_txnid=True)
-    except FileNotFoundError as e:
-        st.error(str(e))
-        return
+    """Load matched TB + GL backup sets by choosing one year-range and loading both files."""
+    year_ranges = [(2020, 2022), (2021, 2023), (2022, 2024), (2023, 2025), (2024, 2026)]
+    import random
+    y0, y1 = random.choice(year_ranges)
+    tb_file = f"backup_tb_{y0}_{y1}.csv"
+    gl_file = f"backup_gl_{y0}_{y1}_with_txnid.csv"
 
-    tb_file = f"backup_tb_{dataset_name}.csv"
-    gl_file = f"backup_gl_{dataset_name}_with_txnid.csv"
+    tb_path = get_sample_data_path(tb_file)
+    gl_path = get_sample_data_path(gl_file)
+
+    tb_df = pd.read_csv(tb_path)
+    gl_df = pd.read_csv(gl_path)
 
     st.session_state["tb_df"] = tb_df
     st.session_state["gl_df"] = gl_df
@@ -162,13 +164,8 @@ with st.sidebar:
         st.caption(f"Could not load demo template: {e}")
 
     # A3) Load random sample set (TB+GL together)
-    available_sets = list_backup_sets(require_with_txnid=True)
-    if not available_sets:
-        st.warning("No backup sample packs found in assets/sample_data. Add files like backup_tb_2020_2022.csv and backup_gl_2020_2022_with_txnid.csv.")
-        st.button("Load Random Sample Set (TB + GL backup pack)", disabled=True)
-    else:
-        if st.button("Load Random Sample Set (TB + GL backup pack)"):
-            load_random_set()
+    if st.button("Load Random Sample Set (TB + GL, 3 years)"):
+        load_random_set()
 
     # A2) Download current dataset (TB+GL zip)
     if st.session_state["tb_df"] is not None and st.session_state["gl_df"] is not None:
@@ -400,6 +397,21 @@ if st.button("Generate 3-Statement Outputs", type="primary"):
         unit_scale=float(st.session_state["unit_scale"]),
     )
 
+    # Persist output so Streamlit reruns don’t lose it
+    st.session_state["last_excel_bytes"] = out_bytes.getvalue()
+
+    # Build a simple preview (accounts on left, years on top) + include check rows
+    try:
+        years_all = sorted(financial_data.keys())
+        stmt_years = years_all[1:] if len(years_all) > 1 else years_all
+        preview_df = pd.DataFrame({y: financial_data[y] for y in stmt_years})
+        checks = compute_reconciliation_checks(financial_data)
+        preview_df.loc["CHECK_balance_sheet (should be 0)"] = [checks.get(y, {}).get("balance_sheet_check", 0.0) for y in stmt_years]
+        preview_df.loc["CHECK_cashflow (should be 0)"] = [checks.get(y, {}).get("cashflow_check", 0.0) for y in stmt_years]
+        st.session_state["preview_df"] = preview_df
+    except Exception:
+        st.session_state["preview_df"] = None
+
     st.success("Generated Excel output.")
     st.download_button(
         "Download Excel Output",
@@ -407,3 +419,17 @@ if st.button("Generate 3-Statement Outputs", type="primary"):
         file_name="3statement_output.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+
+# Persisted output preview / download (survives reruns)
+if st.session_state.get("last_excel_bytes"):
+    st.download_button(
+        "Download Excel Output (last run)",
+        data=st.session_state["last_excel_bytes"],
+        file_name="3statement_output.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="download_last_excel",
+    )
+
+if st.session_state.get("preview_df") is not None:
+    st.subheader("3-Statement Output Preview")
+    st.dataframe(st.session_state["preview_df"], use_container_width=True)
