@@ -659,8 +659,17 @@ if st.session_state.get("preview_sections"):
                 if df is None or (hasattr(df, "empty") and df.empty):
                     st.info("No preview data available for this section.")
                 else:
-                    try:
-                        # nicer numeric formatting
-                        st.dataframe(df.style.format("{:,.0f}"), use_container_width=True)
-                    except Exception:
-                        st.dataframe(df, use_container_width=True)
+                    # Clean display: Streamlit shows Python None as 'None' which is misleading for section headers.
+                    # For website preview only: show blanks for headers and 0 for unmapped numeric rows (already 0 in df).
+                    df_show = df.copy()
+                    df_show = df_show.replace({None: np.nan})
+
+                    def _fmt_cell(x):
+                        if pd.isna(x):
+                            return ""
+                        if isinstance(x, (int, float, np.integer, np.floating)):
+                            return f"{float(x):,.0f}"
+                        return str(x)
+
+                    df_show = df_show.applymap(_fmt_cell)
+                    st.dataframe(df_show, use_container_width=True)
