@@ -464,50 +464,51 @@ def calculate_3statements_from_tb_gl(tb_df: pd.DataFrame,
 
     return combined
 
-def compute_reconciliation_checks(financial_data: Dict[int, Dict]) -> Dict[int, Dict[str, float]]:
-    '''
-    Compute reconciliation checks without relying on Excel formula calculation.
 
-    Important:
-      - The *template check rows* (Row 3 for Balance Sheet, Row 81 for Cash Tie-out) are intended to validate
-        that the statements are internally consistent with the TB/GL inputs.
-      - A Trial Balance (TB) snapshot is, by definition, balanced (Assets = Liabilities + Equity) at each year-end.
-        Therefore the Balance Sheet Check should be computed using *TB equity* (Common Stock + Retained Earnings from TB),
-        not a simplified retained-earnings roll-forward that ignores other equity movements (OCI, FX, acquisitions, etc).
+def compute_reconciliation_checks(financial_data: Dict[int, Dict]) -> Dict[int, Dict[str, float]]:
+    """
+    Compute reconciliation checks in a way that matches the updated template logic.
+
+    IMPORTANT DESIGN (per project constraints):
+      - Balance Sheet check MUST use the TB equity balances (Common Stock + Retained Earnings from TB),
+        because the template now treats equity balances as INPUTS (blue) rather than forcing a roll-forward.
+      - We still compute a Retained Earnings roll-forward (RE_calc) for diagnostics only.
+        Any difference is reported as 'retained_earnings_diff' (TB_RE - RE_calc).
 
     Returns a dict keyed by statement year with:
-      - balance_sheet_check: Assets - (Liabilities + Equity_TB)  (should be ~0 when TB is balanced)
-      - balance_sheet_check_model: Assets - (Liabilities + Equity_calc) (diagnostic only)
-      - cashflow_check: Cash(TB) - EndingCash_calc (should be ~0 when cash-flow drivers fully explain ΔCash)
-      - retained_earnings_calc: RE_prev + NI - Div (simplified diagnostic roll-forward)
-      - retained_earnings_tb: RE from TB snapshot
-      - equity_rollforward_delta: RE_TB - RE_calc (diagnostic; non-zero implies other equity movements not modelled)
-    '''
+      - balance_sheet_check: Assets - (Liabilities + Equity_TB)
+      - cashflow_check: Cash(TB) - EndingCash_calc
+      - retained_earnings_calc: RE_prev + NI - Div (diagnostic)
+      - retained_earnings_tb: RE from TB (input)
+      - retained_earnings_diff: TB_RE - RE_calc (diagnostic)
+    """
     if not financial_data:
         return {}
 
     years = sorted(financial_data.keys())
+    if len(years) < 2:
+        return {}
+
     year0 = years[0]
     stmt_years = years[1:]
 
-    # Simplified RE calc roll-forward (diagnostic only)
+    # Diagnostic RE roll-forward starting from TB Year0 RE
     re_calc = {year0: float(financial_data[year0].get('retained_earnings', 0.0) or 0.0)}
-
     checks: Dict[int, Dict[str, float]] = {}
 
-    for y in stmt_years:
-        prev = year0 if y == stmt_years[0] else stmt_years[stmt_years.index(y) - 1]
-
+    for i, y in enumerate(stmt_years):
+        prev = year0 if i == 0 else stmt_years[i-1]
         ni = float(financial_data[y].get('net_income', 0.0) or 0.0)
         div = float(financial_data[y].get('dividends', 0.0) or 0.0)
         re_calc[y] = float(re_calc[prev] + ni - div)
 
-        # Assets (modelled subset)
+        # Assets (modelled set)
         cash = float(financial_data[y].get('cash', 0.0) or 0.0)
         ar = float(financial_data[y].get('accounts_receivable', 0.0) or 0.0)
         inv = float(financial_data[y].get('inventory', 0.0) or 0.0)
         pre = float(financial_data[y].get('prepaid_expenses', 0.0) or 0.0)
         oca = float(financial_data[y].get('other_current_assets', 0.0) or 0.0)
+
         ppe_g = float(financial_data[y].get('ppe_gross', 0.0) or 0.0)
         acc_dep = float(financial_data[y].get('accumulated_depreciation', 0.0) or 0.0)
         net_ppe = ppe_g - acc_dep
@@ -523,17 +524,14 @@ def compute_reconciliation_checks(financial_data: Dict[int, Dict]) -> Dict[int, 
         debt = float(financial_data[y].get('long_term_debt', 0.0) or 0.0)
         liabilities = ap + accr + defrev + intpay + ocl + taxpay + debt
 
-        # Equity (TB-based vs simplified calc)
+        # Equity (TB inputs, per template)
         cs = float(financial_data[y].get('common_stock', 0.0) or 0.0)
         re_tb = float(financial_data[y].get('retained_earnings', 0.0) or 0.0)
-
         equity_tb = cs + re_tb
-        equity_calc = cs + re_calc[y]
 
-        balance_sheet_check = assets - (liabilities + equity_tb)
-        balance_sheet_check_model = assets - (liabilities + equity_calc)
+        bs_check = assets - (liabilities + equity_tb)
 
-        # Cashflow check (Year0 cash is the opening balance for the first statement year)
+        # Cashflow check (standard cash roll-forward)
         begin_cash = float(financial_data[prev].get('cash', 0.0) or 0.0)
         dep = float(financial_data[y].get('depreciation_expense', 0.0) or 0.0)
 
@@ -555,19 +553,17 @@ def compute_reconciliation_checks(financial_data: Dict[int, Dict]) -> Dict[int, 
 
         net_cash_change = (ni + dep + wc) + capex + (stock - div + deltadebt)
         end_cash_calc = begin_cash + net_cash_change
-        cashflow_check = cash - end_cash_calc
+        cf_check = cash - end_cash_calc
 
         checks[y] = {
-            'balance_sheet_check': balance_sheet_check,
-            'balance_sheet_check_model': balance_sheet_check_model,
-            'cashflow_check': cashflow_check,
+            'balance_sheet_check': bs_check,
+            'cashflow_check': cf_check,
             'retained_earnings_calc': re_calc[y],
             'retained_earnings_tb': re_tb,
-            'equity_rollforward_delta': (re_tb - re_calc[y]),
+            'retained_earnings_diff': re_tb - re_calc[y],
         }
 
     return checks
-
 
 
 
