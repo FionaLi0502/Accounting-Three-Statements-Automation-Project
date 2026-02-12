@@ -62,3 +62,20 @@ htmlcov/
 uploaded_files/
 user_data/
 feedback_log.txt
+
+# --- Project-specific: do NOT commit backups ---
+ai_accounting_agent_BACKUP_FEB2026/
+backup files/
+New folder/
+
+# --- Generated outputs (do NOT commit) ---
+outputs/
+*.pdf
+*.zip
+*Output*.xlsx
+*CHECKS_ZERO*.xlsx
+*TEST*.xlsx
+*export*.csv
+
+# --- Make sure .venv folder is ignored ---
+.venv/
