@@ -14,6 +14,8 @@ import zipfile
 from datetime import datetime
 
 import pandas as pd
+import openpyxl
+import numpy as np
 import streamlit as st
 
 from validation import (
@@ -23,7 +25,7 @@ from validation import (
     validate_year0_opening_snapshot,
     add_year0_snapshot,
 )
-from mapping import map_accounts
+from mapping import map_accounts, TEMPLATE_LABEL_MAPPING
 from excel_writer import (
     calculate_3statements_from_tb_gl,
     calculate_financial_statements,
@@ -66,6 +68,8 @@ for k, default in {
     "strict_mode": True,
     "template_type": "zero",  # 'zero' or 'demo'
     "dataset_source": None,  # 'random' or 'upload'
+    "preview_sections": {},
+    "last_excel_bytes": None,
 }.items():
     if k not in st.session_state:
         st.session_state[k] = default
@@ -94,6 +98,205 @@ def _count_by_severity(issues):
             counts[sev] = 0
         counts[sev] += 1
     return counts
+
+
+def _find_row_exact(ws, label: str, start_row: int = 1, end_row: int = 200):
+    target = str(label).strip().lower()
+    for r in range(start_row, end_row + 1):
+        v = ws.cell(r, 1).value
+        if v is None:
+            continue
+        if str(v).strip().lower() == target:
+            return r
+    return None
+
+
+def _extract_labels(ws, start_row: int, end_row: int) -> list[str]:
+    labels = []
+    for r in range(start_row, end_row + 1):
+        v = ws.cell(r, 1).value
+        if v is None:
+            labels.append("")
+        else:
+            labels.append(str(v).strip())
+    return labels
+
+
+def _compute_template_preview_sections(financial_data: dict, template_path: str, unit_scale: int = 1):
+    """
+    Build template-matching preview tables (Income Statement / Balance Sheet / Cash Flow)
+    using the template's label order as the source of truth.
+
+    Returns:
+        dict[str, pd.DataFrame] sections
+    """
+    if not financial_data:
+        return {}
+
+    wb = openpyxl.load_workbook(template_path, data_only=False)
+    ws = wb["Blank 3 Statement Model"] if "Blank 3 Statement Model" in wb.sheetnames else wb[wb.sheetnames[0]]
+
+    years_all = sorted(financial_data.keys())
+    stmt_years = years_all[1:] if len(years_all) > 1 else years_all  # hide Year0 in preview
+
+    # Helper: fetch value by internal key
+    def v(y: int, key: str) -> float:
+        try:
+            return float(financial_data.get(y, {}).get(key, 0.0) or 0.0) / float(unit_scale)
+        except Exception:
+            return 0.0
+
+    # Derived calculations (match template logic)
+    def gross_profit(y): return v(y, "revenue") - v(y, "cogs")
+    def total_opex(y): 
+        return v(y,"distribution_expenses")+v(y,"marketing_admin")+v(y,"research_dev")+v(y,"depreciation_expense")
+    def ebit(y): return gross_profit(y) - total_opex(y)
+    def ebt(y): return ebit(y) - v(y,"interest_expense")
+    def net_income(y): 
+        # prefer calculated if present, else compute
+        ni = v(y,"net_income")
+        return ni if abs(ni) > 1e-9 else (ebt(y) - v(y,"tax_expense"))
+
+    def total_current_assets(y):
+        return v(y,"cash")+v(y,"accounts_receivable")+v(y,"inventory")+v(y,"prepaid_expenses")+v(y,"other_current_assets")
+    def net_ppe(y):
+        return v(y,"ppe_gross") - v(y,"accumulated_depreciation")
+    def total_assets(y):
+        return total_current_assets(y) + net_ppe(y)
+
+    def total_current_liab(y):
+        return (v(y,"accounts_payable")+v(y,"accrued_payroll")+v(y,"deferred_revenue")+
+                v(y,"interest_payable")+v(y,"other_current_liabilities")+v(y,"income_taxes_payable"))
+    def total_equity(y):
+        return v(y,"common_stock") + v(y,"retained_earnings")
+    def total_le(y):
+        return total_current_liab(y) + v(y,"long_term_debt") + total_equity(y)
+
+    # Cash Flow
+    def cfo(y):
+        return (net_income(y) + v(y,"depreciation_expense") +
+                v(y,"delta_ar")+v(y,"delta_inventory")+v(y,"delta_prepaid")+v(y,"delta_other_current_assets")+
+                v(y,"delta_ap")+v(y,"delta_accrued_payroll")+v(y,"delta_deferred_revenue")+v(y,"delta_interest_payable")+
+                v(y,"delta_other_current_liabilities")+v(y,"delta_income_taxes_payable"))
+    def cfi(y): return v(y,"capex")
+    def cff(y): return v(y,"stock_issuance") + (-v(y,"dividends")) + v(y,"delta_debt")
+    def net_change_cash(y): return cfo(y) + cfi(y) + cff(y)
+    def begin_cash(y): return v(y,"beginning_cash")
+    def end_cash(y):
+        # prefer key if exists, else compute
+        ec = v(y,"cash")
+        return ec if abs(ec) > 1e-9 else (begin_cash(y) + net_change_cash(y))
+
+    # Checks (match your Row3/Row81 intent)
+    checks = compute_reconciliation_checks(financial_data)
+    def bs_check(y): return float(checks.get(y, {}).get("balance_sheet_check", 0.0) or 0.0) / float(unit_scale)
+    def cf_check(y): return float(checks.get(y, {}).get("cashflow_check", 0.0) or 0.0) / float(unit_scale)
+
+    # Map template label -> internal key (reverse mapping)
+    label_to_key = TEMPLATE_LABEL_MAPPING
+
+    # Build a section DataFrame from template row range
+    def build_df(row_start: int, row_end: int) -> pd.DataFrame:
+        labels = _extract_labels(ws, row_start, row_end)
+        data = {}
+        for y in stmt_years:
+            col = []
+            for lab in labels:
+                if lab == "":
+                    col.append(np.nan)
+                    continue
+
+                # Headings (keep blank values)
+                heading = lab.upper() == lab or lab.endswith(":") or lab in [
+                    "ASSETS", "LIABILITIES AND SHAREHOLDERS' EQUITY",
+                    "Current Assets:", "Non-Current Assets:", "Current Liabilities:",
+                    "Non-Current Liabilities:", "Shareholder's Equity:",
+                    "Cash Flow Statement", "Cash Flows from Operating Activities:",
+                    "Changes in Operating Assets and Liabilities:", "Investing Activities:",
+                    "Financing Activities:"
+                ]
+                if heading:
+                    col.append(np.nan)
+                    continue
+
+                # Direct mapped inputs
+                if lab in label_to_key:
+                    col.append(v(y, label_to_key[lab]))
+                    continue
+
+                # Derived / totals
+                derived = {
+                    "Gross Profit": gross_profit,
+                    "EBIT (Operating Profit)": ebit,
+                    "Income Before Taxes": ebt,
+                    "Net Income": net_income,
+                    "Total Current Assets": total_current_assets,
+                    "Property Plant and Equipment - Net": net_ppe,
+                    "TOTAL ASSETS": total_assets,
+                    "Total Current Liabilities:": total_current_liab,
+                    "Total Shareholders' Equity": total_equity,
+                    "TOTAL LIABILITIES AND SHAREHOLDERS' EQUITY": total_le,
+                    "Net Cash Provided by Operating Activities": cfo,
+                    "Cash Flows from Investing Activities": cfi,
+                    "Cash Flows from Financing Activities": cff,
+                    "Increase/(Decrease) in Cash and Equivalents": net_change_cash,
+                    "Cash and Equivalents, Beginning of the Year": begin_cash,
+                    "Cash and Equivalents, End of the Year": end_cash,
+                    # Checks (these rows are outside the sections, but safe)
+                    "Balance Sheet Check (Assets - L+E)": bs_check,
+                    "Check": cf_check,
+                }
+                if lab in derived:
+                    col.append(float(derived[lab](y)))
+                    continue
+
+                # Default blank
+                col.append(np.nan)
+
+            data[f"FY{y}"] = col
+
+        df = pd.DataFrame(data, index=labels)
+        return df
+
+    # Find row ranges by labels (use the template's second 'Income Statement' section for actual output)
+    is_header = _find_row_exact(ws, "Income Statement", start_row=25, end_row=120)  # should find row 30
+    is_start = _find_row_exact(ws, "Revenues", start_row=is_header or 1, end_row=140)
+    is_end = _find_row_exact(ws, "Common Dividends", start_row=is_start or 1, end_row=160)
+
+    bs_header = _find_row_exact(ws, "Balance Sheet", start_row=40, end_row=120)  # should find row 48
+    bs_start = _find_row_exact(ws, "ASSETS", start_row=bs_header or 1, end_row=200)
+    bs_end = _find_row_exact(ws, "Check", start_row=bs_start or 1, end_row=140)  # row 81 (check line)
+
+    cf_header = _find_row_exact(ws, "Cash Flow Statement", start_row=70, end_row=160)  # row 84
+    cf_start = _find_row_exact(ws, "Cash Flows from Operating Activities:", start_row=cf_header or 1, end_row=200)
+    cf_end = _find_row_exact(ws, "Cash and Equivalents, End of the Year", start_row=cf_start or 1, end_row=220)
+
+    sections = {}
+
+    # Income Statement (include from Revenues down to Common Dividends)
+    if is_start and is_end:
+        sections["Income Statement"] = build_df(is_start, is_end)
+    # Balance Sheet (include from ASSETS down to TOTAL L+E)
+    if bs_start and bs_end:
+        # bs_end is 'Check' row; include up to TOTAL L+E row (one above check)
+        sections["Balance Sheet"] = build_df(bs_start, bs_end - 2)
+    # Cash Flow (include from Operating Activities down to End of Year)
+    if cf_start and cf_end:
+        sections["Cash Flow Statement"] = build_df(cf_start, cf_end)
+
+    # Checks section (explicit)
+    checks_df = pd.DataFrame(
+        {
+            f"FY{y}": {
+                "Balance Sheet Check (Assets - L+E)": bs_check(y),
+                "Cash Tie-out Check": cf_check(y),
+            }
+            for y in stmt_years
+        }
+    )
+    sections["Checks"] = checks_df
+
+    return sections
 
 
 def run_validation():
@@ -400,17 +603,16 @@ if st.button("Generate 3-Statement Outputs", type="primary"):
     # Persist output so Streamlit reruns don’t lose it
     st.session_state["last_excel_bytes"] = out_bytes.getvalue()
 
-    # Build a simple preview (accounts on left, years on top) + include check rows
+    # Build a template-matching preview (Income Statement / Balance Sheet / Cash Flow)
     try:
-        years_all = sorted(financial_data.keys())
-        stmt_years = years_all[1:] if len(years_all) > 1 else years_all
-        preview_df = pd.DataFrame({y: financial_data[y] for y in stmt_years})
-        checks = compute_reconciliation_checks(financial_data)
-        preview_df.loc["CHECK_balance_sheet (should be 0)"] = [checks.get(y, {}).get("balance_sheet_check", 0.0) for y in stmt_years]
-        preview_df.loc["CHECK_cashflow (should be 0)"] = [checks.get(y, {}).get("cashflow_check", 0.0) for y in stmt_years]
-        st.session_state["preview_df"] = preview_df
+        template_path_for_preview = get_template_path(st.session_state.get("template_type", "zero"))
+        st.session_state["preview_sections"] = _compute_template_preview_sections(
+            financial_data=financial_data,
+            template_path=template_path_for_preview,
+            unit_scale=st.session_state.get("unit_scale", 1),
+        )
     except Exception:
-        st.session_state["preview_df"] = None
+        st.session_state["preview_sections"] = {}
 
     st.success("Generated Excel output.")
     st.download_button(
@@ -430,6 +632,21 @@ if st.session_state.get("last_excel_bytes"):
         key="download_last_excel",
     )
 
-if st.session_state.get("preview_df") is not None:
-    st.subheader("3-Statement Output Preview")
-    st.dataframe(st.session_state["preview_df"], use_container_width=True)
+if st.session_state.get("preview_sections"):
+    st.subheader("3-Statement Output Preview (Template-Matching)")
+
+    sections = st.session_state["preview_sections"]
+    tab_names = [k for k in ["Income Statement", "Balance Sheet", "Cash Flow Statement", "Checks"] if k in sections]
+    if tab_names:
+        tabs = st.tabs(tab_names)
+        for tname, tab in zip(tab_names, tabs):
+            with tab:
+                df = sections.get(tname)
+                if df is None or (hasattr(df, "empty") and df.empty):
+                    st.info("No preview data available for this section.")
+                else:
+                    try:
+                        # nicer numeric formatting
+                        st.dataframe(df.style.format("{:,.0f}"), use_container_width=True)
+                    except Exception:
+                        st.dataframe(df, use_container_width=True)
