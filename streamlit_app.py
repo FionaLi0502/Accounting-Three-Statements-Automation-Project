@@ -206,18 +206,6 @@ def _compute_template_preview_sections(financial_data: dict, template_path: str,
                     col.append(np.nan)
                     continue
 
-                # Headings (keep blank values)
-                heading = lab.upper() == lab or lab.endswith(":") or lab in [
-                    "ASSETS", "LIABILITIES AND SHAREHOLDERS' EQUITY",
-                    "Current Assets:", "Non-Current Assets:", "Current Liabilities:",
-                    "Non-Current Liabilities:", "Shareholder's Equity:",
-                    "Cash Flow Statement", "Cash Flows from Operating Activities:",
-                    "Changes in Operating Assets and Liabilities:", "Investing Activities:",
-                    "Financing Activities:"
-                ]
-                if heading:
-                    col.append(np.nan)
-                    continue
 
                 # Direct mapped inputs
                 if lab in label_to_key:
@@ -243,15 +231,32 @@ def _compute_template_preview_sections(financial_data: dict, template_path: str,
                     "Cash and Equivalents, Beginning of the Year": begin_cash,
                     "Cash and Equivalents, End of the Year": end_cash,
                     # Checks (these rows are outside the sections, but safe)
-                    "Balance Sheet Check (Assets - L+E)": bs_check,
+                    "Balance Sheet Check (A - L + E)": bs_check,
                     "Check": cf_check,
                 }
                 if lab in derived:
                     col.append(float(derived[lab](y)))
                     continue
 
-                # Default blank
-                col.append(np.nan)
+
+                # Headings / section labels should stay blank; unmapped numeric rows show 0 to avoid "missing statement" look
+                heading_labels = {
+                    "ASSETS", "LIABILITIES AND SHAREHOLDERS' EQUITY",
+                    "Current Assets:", "Non-Current Assets:", "Current Liabilities:",
+                    "Non-Current Liabilities:", "Shareholder's Equity:",
+                    "Cash Flow Statement", "Cash Flows from Operating Activities:",
+                    "Changes in Operating Assets and Liabilities:", "Investing Activities:",
+                    "Financing Activities:",
+                    "Revenues", "Operating Expenses", "Other Expense / (Income)", "Taxes",
+                }
+                is_heading = (lab in heading_labels) or (lab.endswith(":") and not lab.lower().startswith("total"))
+                # Some templates use ALL CAPS for section headers; do NOT treat totals as headings (handled above in derived).
+                is_heading = is_heading or (lab.upper() == lab and lab not in {"TOTAL ASSETS", "TOTAL LIABILITIES AND SHAREHOLDERS' EQUITY"})
+
+                if is_heading:
+                    col.append(np.nan)
+                else:
+                    col.append(0.0)
 
             data[f"FY{y}"] = col
 
@@ -288,7 +293,7 @@ def _compute_template_preview_sections(financial_data: dict, template_path: str,
     checks_df = pd.DataFrame(
         {
             f"FY{y}": {
-                "Balance Sheet Check (Assets - L+E)": bs_check(y),
+                "Balance Sheet Check (A - L + E)": bs_check(y),
                 "Cash Tie-out Check": cf_check(y),
             }
             for y in stmt_years
