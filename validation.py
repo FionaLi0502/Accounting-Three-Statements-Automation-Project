@@ -521,14 +521,15 @@ def apply_auto_fixes(df: pd.DataFrame, selected_fixes: List[str]) -> Tuple[pd.Da
             df.loc[neg, "AccountNumber"] = df.loc[neg, "AccountNumber"].abs()
             changes.append(f"Converted {count} negative AccountNumber value(s) to positive")
 
-    # remove_duplicates (TransactionID)
-    if "remove_duplicates" in selected_fixes and "TransactionID" in df.columns:
+    # remove_duplicates (exact duplicate rows, not TransactionID)
+    # NOTE: In real GL exports, TransactionID commonly repeats across debit/credit lines.
+    # Dropping duplicates by TransactionID would break balancing, so we only drop fully-duplicate rows.
+    if "remove_duplicates" in selected_fixes:
         before = len(df)
-        df = df.drop_duplicates(subset=["TransactionID"], keep="first")
+        df = df.drop_duplicates(keep="first")
         removed = before - len(df)
         if removed > 0:
-            changes.append(f"Removed {removed} duplicate TransactionID row(s) (kept first)")
-
+            changes.append(f"Removed {removed} fully-duplicate row(s) (kept first)")
     return df, changes
 
 
