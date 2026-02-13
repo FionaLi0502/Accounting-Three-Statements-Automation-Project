@@ -403,3 +403,6 @@ def create_cash_flow_table(financial_data: Dict[int, Dict],
     ]))
     
     return table
+
+# Alias for backwards compatibility
+generate_pdf_report = create_pdf_report
