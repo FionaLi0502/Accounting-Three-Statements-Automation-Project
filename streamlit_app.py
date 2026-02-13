@@ -710,10 +710,17 @@ if st.button("Generate 3-Statement Outputs", type="primary"):
     # PDF Report Generation
     # ========================================
     try:
+        # Convert unit_scale to unit_label string
+        unit_scale = st.session_state.get("unit_scale", 1000)
+        if unit_scale == 1000:
+            unit_label = "USD thousands"
+        else:
+            unit_label = "USD"
+        
         pdf_bytes = generate_pdf_report(
             financial_data=financial_data,
-            summary_text=summary_text if summary_text else "Summary not available",
-            unit_scale=st.session_state.get("unit_scale", 1000)
+            ai_summary=summary_text if summary_text else "Summary not available",
+            unit_label=unit_label
         )
         
         st.download_button(
